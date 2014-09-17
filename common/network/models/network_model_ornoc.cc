@@ -25,6 +25,7 @@ SInt32 NetworkModelOrnoc::enet_height_per_layer;
 // clusters
 SInt32 NetworkModelOrnoc::num_clusters;
 SInt32 NetworkModelOrnoc::num_clusters_per_layer;
+SInt32 NetworkModelOrnoc::num_tiles_per_layer;
 SInt32 NetworkModelOrnoc::cluster_size;
 SInt32 NetworkModelOrnoc::numX_clusters_per_layer;
 SInt32 NetworkModelOrnoc::numY_clusters_per_layer;
@@ -39,6 +40,7 @@ SInt32 NetworkModelOrnoc::numY_sub_clusters;
 SInt32 NetworkModelOrnoc::sub_cluster_width;
 SInt32 NetworkModelOrnoc::sub_cluster_height;
 
+vector<NetworkModelOrnoc::Ring> NetworkModelOrnoc::rings;
 vector<NetworkModelOrnoc::ClusterInfo> NetworkModelOrnoc::cluster_info_list;
 NetworkModelOrnoc::ReceiveNetworkType NetworkModelOrnoc::receive_network_type;
 SInt32 NetworkModelOrnoc::num_receive_networks_per_cluster;
@@ -46,6 +48,7 @@ SInt32 NetworkModelOrnoc::max_wavelengths_per_ring;
 NetworkModelOrnoc::RoutingStrategy NetworkModelOrnoc::routing_strategy;
 SInt32 NetworkModelOrnoc::unicast_distance_threshold;
 bool NetworkModelOrnoc::contention_model_enabled;
+bool NetworkModelOrnoc::verbose_output;
 
 vector< vector<bool> > NetworkModelOrnoc::connectvitiy_matrix;
 string NetworkModelOrnoc::connectivity_matrix_path;
@@ -116,6 +119,7 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 		  num_layers = Sim()->getCfg()->getInt("network/ornoc/num_layers");
 		  contention_model_enabled = Sim()->getCfg()->getBool("network/ornoc/queue_model/enabled");
 		  connectivity_matrix_path = Sim()->getCfg()->getString("network/ornoc/connectivity_matrix_path");
+		  verbose_output = Sim()->getCfg()->getBool("network/ornoc/verbose");
 	   }
 	   catch (...)
 	   {
@@ -142,6 +146,8 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	   num_clusters_per_layer = num_clusters / num_layers;
 	   LOG_ASSERT_ERROR(num_clusters_per_layer > 0, "Number of Clusters(%i) must be > 0", num_clusters);
 
+	   num_tiles_per_layer = num_clusters_per_layer * cluster_size;
+
 	   num_sub_clusters = num_access_points_per_cluster;
 	   LOG_ASSERT_ERROR(isPower2(num_access_points_per_cluster),
 	         "Number of Optical Access Points(%i) must be a power of 2", num_access_points_per_cluster);
@@ -149,7 +155,7 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	   num_layers = num_clusters / num_layers;
 	   LOG_ASSERT_ERROR(num_layers > 1, "Number of Layers(%i) must be > 1", num_layers);
 
-	   enet_width_per_layer = (SInt32) floor(sqrt(cluster_size * num_layers));
+	   enet_width_per_layer = (SInt32) floor(sqrt(num_application_tiles));
 	   enet_height_per_layer = enet_width_per_layer;
 
 	   initializeClusters();
@@ -241,16 +247,346 @@ void NetworkModelOrnoc::createRNetRouterAndLinkModels()
      assert(enet_link_list[i]->getDelay() == 1);
   }
 
+  // instantiate optical send and receive routers
+  cluster_id_t cluster_id = getClusterID(_tile_id);
+
+  if (_tile_id == getTileIDWithOpticalHub(cluster_id)){
+
+	  SInt32 num_send_ports = getNumOniSendPorts(cluster_id);
+	  SInt32 num_receive_ports = getNumOniReceivePorts(cluster_id);
+
+      send_hub_router = new RouterModel(this, _frequency, _voltage,
+                                         num_access_points_per_cluster, num_send_ports,
+                                         num_flits_per_output_buffer_send_hub_router, send_hub_router_delay, _flit_width,
+                                         contention_model_enabled, contention_model_type);
+
+      // optical link power models
+      optical_links.resize(num_send_ports);
+      double waveguide_length = computeOpticalLinkLength(); // in mm
+
+      for (SInt32 i = 0; i < num_send_ports; i++) {
+    	  optical_links[i] = new OpticalLinkModel(this, num_clusters_per_layer, _frequency, _voltage, waveguide_length, _flit_width);
+    	  LOG_ASSERT_ERROR(optical_links[i]->getDelay() == 3, "Optical link delay should be 3. Now %llu", optical_links[i]->getDelay());
+      }
+
+      // receive hub router models
+      receive_hub_router = new RouterModel(this, _frequency, _voltage,
+    		  	  	  	  	  	  	  	   num_receive_ports, num_receive_networks_per_cluster,
+                                           num_flits_per_output_buffer_receive_hub_router, receive_hub_router_delay,
+                                           _flit_width,
+                                           contention_model_enabled, contention_model_type);
+
+      // todo: receive net etc
+
+  } // tile_id with optical hub
+
 }
 
+//TODO
 void NetworkModelOrnoc::destroyRNetRouterAndLinkModels()
 {
 	// TODO
 }
 
+//TODO
 void NetworkModelOrnoc::routePacket(const NetPacket& pkt, queue<Hop>& next_hops)
 {
+	   tile_id_t pkt_sender = TILE_ID(pkt.sender);
+	   tile_id_t pkt_receiver = TILE_ID(pkt.receiver);
 
+	   if (pkt.node_type == SEND_TILE) {
+	      assert(pkt_sender == _tile_id);
+
+	      UInt64 zero_load_delay = 0;
+	      UInt64 contention_delay = 0;
+	      injection_router->processPacket(pkt, 0, zero_load_delay, contention_delay);
+
+	      Hop hop(pkt, _tile_id, EMESH, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+	      next_hops.push(hop);
+	   }
+	   else {
+	      Route computed_route = computeGlobalRoute(pkt_sender, pkt_receiver);
+	      if (computed_route == ENET) {
+	         LOG_PRINT("Route: ENET");
+	         routePacketOnENet(pkt, pkt_sender, pkt_receiver, next_hops);
+	      }
+	      else if (computed_route == ONET) {
+	         LOG_PRINT("Route: ONET");
+	         routePacketOnONet(pkt, pkt_sender, pkt_receiver, next_hops);
+	      }
+	   }
+}
+
+NetworkModelOrnoc::Route NetworkModelOrnoc::computeGlobalRoute(tile_id_t sender, tile_id_t receiver)
+{
+   if (receiver == NetPacket::BROADCAST)
+	  return ONET;
+
+   if (getClusterID(sender) == getClusterID(receiver)){
+	  return ENET;
+   }
+   else {
+	  if (routing_strategy == ISOLATED_CLUSTERS){
+		 return ONET;
+	  }
+	  else // EFFICIENT
+	  {
+		 SInt32 num_hops_on_enet = computeNumHopsOnENet(sender, receiver);
+		 return (num_hops_on_enet <= unicast_distance_threshold) ? ENET : ONET;
+	  }
+   }
+}
+
+void NetworkModelOrnoc::routePacketOnENet(const NetPacket& pkt, tile_id_t sender, tile_id_t receiver, queue<Hop>& next_hops)
+{
+   LOG_ASSERT_ERROR(receiver != NetPacket::BROADCAST, "Cannot broadcast packets on ENet");
+
+   SInt32 cx, cy, cl, dx, dy, dl;
+   computePosition(_tile_id, cx, cy, cl);
+   computePosition(receiver, dx, dy, dl);
+
+   LOG_ASSERT_ERROR(cl == dl, "ENet communication cannot take place across layers.");
+
+   NextDest next_dest;
+
+   if (cx > dx)
+	  next_dest = NextDest(computeTileID(cx-1, cy, cl), LEFT, EMESH);
+   else if (cx < dx)
+	  next_dest = NextDest(computeTileID(cx+1, cy, cl), RIGHT, EMESH);
+   else if (cy > dy)
+	  next_dest = NextDest(computeTileID(cx, cy-1, cl), DOWN, EMESH);
+   else if (cy < dy)
+	  next_dest = NextDest(computeTileID(cx, cy+1, cl), UP, EMESH);
+   else // (cx == dx) && (cy == dy)
+	  next_dest = NextDest(_tile_id, SELF, RECEIVE_TILE);
+
+   UInt64 zero_load_delay = 0;
+   UInt64 contention_delay = 0;
+
+   // go through router and link
+   assert(0 <= next_dest._output_port && next_dest._output_port < (SInt32) enet_link_list.size());
+
+   enet_router->processPacket(pkt, next_dest._output_port, zero_load_delay, contention_delay);
+   enet_link_list[next_dest._output_port]->processPacket(pkt, zero_load_delay);
+
+   Hop hop(pkt, next_dest._tile_id, next_dest._node_type, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+   next_hops.push(hop);
+}
+
+void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender, tile_id_t receiver, queue<Hop>& next_hops)
+{
+
+   // packet must be routed to access point/ONI via emesh first
+   if (pkt.node_type == EMESH) {
+	   // make sure we are withing the same cluster
+	  assert(getClusterID(sender) == getClusterID(_tile_id));
+
+	  if (isAccessPoint(_tile_id)) {
+		 UInt64 zero_load_delay = 0;
+		 UInt64 contention_delay = 0;
+
+		 enet_router->processPacket(pkt, num_enet_router_ports, zero_load_delay, contention_delay);
+		 enet_link_list[num_enet_router_ports]->processPacket(pkt, zero_load_delay);
+
+		 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(_tile_id)), SEND_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+		 next_hops.push(hop);
+	  }
+	  else {
+		 tile_id_t access_point = getNearestAccessPoint(sender);
+		 routePacketOnENet(pkt, sender, access_point, next_hops);
+	  }
+   }
+   // after packet has been routed to ONI
+   else if (pkt.node_type == SEND_HUB) {
+
+	 // broadcast mode is not used in ORNoC
+	 assert(receiver != NetPacket::BROADCAST);
+
+	 UInt64 zero_load_delay = 0;
+	 UInt64 contention_delay = 0;
+	 NextDest next_dest;
+	 vector<Ring::Portion> source_portions, receive_portions;
+	 bool found_direct_path = false;
+	 SInt32 cx, cy, cl, dx, dy, dl, this_cluster_id, dest_cluster_id;
+
+	 computePosition(_tile_id, cx, cy, cl);
+	 computePosition(receiver, dx, dy, dl);
+
+	 this_cluster_id = getClusterID(_tile_id);
+	 dest_cluster_id = getClusterID(receiver);
+
+	 getClusterSendPortions(this_cluster_id, source_portions);
+	 getClusterReceivePortions(this_cluster_id, receive_portions);
+
+	 if(cl == dl) {
+		 // presently should not happen
+
+
+	 }
+	 else {
+		 vector<layer_id_t> dest_layer_cluster;
+
+		 // obtain all destination layer's clusters ids
+		 for (auto pit = source_portions.begin(); pit != source_portions.end(); pit++) {
+			 // check for direct path
+			 if (dest_cluster_id == (*pit).target_cluster_id) {
+				 found_direct_path = true;
+				 break;
+			 }
+			 // check for cluster on destination layer
+			 if (dest_cluster_id / 3 == dl) { // todo
+
+			 }
+
+
+		 }
+
+		 if (found_direct_path) {
+
+		 }
+		 else {
+
+		 }
+
+
+
+
+		 // determine if one contains the receiver tile -- if not then choose one at random (for now)
+
+
+
+	 }
+
+
+
+
+
+
+
+	 // find a path to receiver
+	 for (auto pit = source_portions.begin(); pit != source_portions.end(); pit++) {
+		 if (dest_cluster_id == (*pit).target_cluster_id) {
+			 found_direct_path = true;
+			 break;
+		 }
+
+
+
+
+	 }
+
+     for (auto rit = rings.begin(); rit != rings.end(); rit++){
+	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+
+		   // first check for direct transmission
+		   if (((*pit).source_cluster_id == this_cluster_id) && ((*pit).target_cluster_id == dest_cluster_id))
+			   found_direct_path = true;
+	   }
+	 }
+
+     // find next best cluster
+     if (!found_direct_path) {
+    	 //TODO - find most efficient path
+         for (auto rit = rings.begin(); rit != rings.end(); rit++){
+    	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+
+    		   // first check for direct transmission
+    		   if (((*pit).source_cluster_id == this_cluster_id) && ((*pit).target_cluster_id == dest_cluster_id))
+    			   found_direct_path = true;
+    	   }
+    	 }
+
+     }
+
+
+
+
+	 send_hub_router->processPacket(pkt, 0, zero_load_delay, contention_delay);
+
+	 optical_links[0]->processPacket(pkt, 1 /* send to only 1 endpoint */, zero_load_delay);
+
+	 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(receiver)), RECEIVE_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+	 next_hops.push(hop);
+   }
+   else if (pkt.node_type == RECEIVE_HUB)
+   {
+	  vector<tile_id_t> tile_id_list;
+	  getTileIDListInCluster(getClusterID(_tile_id), tile_id_list);
+	  assert(_cluster_size == (SInt32) tile_id_list.size());
+
+	  // get receive net id
+	  SInt32 receive_net_id = computeReceiveNetID(pkt_sender);
+
+	  UInt64 zero_load_delay = 0;
+	  UInt64 contention_delay = 0;
+
+	  // Receive Hub Router
+	  // Update router event counters, get delay, update dynamic energy
+	  _receive_hub_router->processPacket(pkt, receive_net_id, zero_load_delay, contention_delay);
+
+	  if (_receive_net_type == BTREE)
+	  {
+		 // Update link counters, get delay, update dynamic energy
+		 _btree_link_list[receive_net_id]->processPacket(pkt, zero_load_delay);
+	  }
+	  else // (_receive_net_type == STAR)
+	  {
+		 if (pkt_receiver == NetPacket::BROADCAST)
+		 {
+			_star_net_router_list[receive_net_id]->processPacket(pkt, RouterModel::OUTPUT_PORT_ALL, zero_load_delay, contention_delay);
+			// For links, compute max_delay
+			UInt64 max_link_delay = 0;
+			for (SInt32 i = 0; i < _cluster_size; i++)
+			{
+			   UInt64 link_delay = 0;
+			   _star_net_link_list[receive_net_id][i]->processPacket(pkt, link_delay);
+			   max_link_delay = max<UInt64>(max_link_delay, link_delay);
+			}
+			zero_load_delay += max_link_delay;
+		 }
+		 else // (pkt_receiver != NetPacket::BROADCAST)
+		 {
+			SInt32 idx = getIndexInList(pkt_receiver, tile_id_list);
+			assert(idx >= 0 && idx < (SInt32) _cluster_size);
+
+			_star_net_router_list[receive_net_id]->processPacket(pkt, idx, zero_load_delay, contention_delay);
+			_star_net_link_list[receive_net_id][idx]->processPacket(pkt, zero_load_delay);
+		 }
+	  }
+
+	  if (pkt_receiver == NetPacket::BROADCAST)
+	  {
+		 for (vector<tile_id_t>::iterator it = tile_id_list.begin(); it != tile_id_list.end(); it++)
+		 {
+			Hop hop(pkt, *it, RECEIVE_TILE, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+			next_hops.push(hop);
+		 }
+	  }
+	  else // (pkt_receiver != NetPacket::BROADCAST)
+	  {
+		 Hop hop(pkt, pkt_receiver, RECEIVE_TILE, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+		 next_hops.push(hop);
+	  }
+   }
+
+   else
+   {
+	  LOG_PRINT_ERROR("Unrecognized Node Type(%i)", pkt.node_type);
+   }
+}
+
+//TODO
+SInt32 NetworkModelOrnoc::computeNumHopsOnENet(tile_id_t sender, tile_id_t receiver)
+{
+
+}
+
+tile_id_t NetworkModelOrnoc::computeTileID(SInt32 x, SInt32 y, SInt32 l)
+{
+   if ((x < 0) || (y < 0) || (x >= enet_width_per_layer) || (y >= enet_height_per_layer))
+      return INVALID_TILE_ID;
+   else
+      return ((y * enet_width_per_layer + x) + (l * num_tiles_per_layer));
 }
 
 void NetworkModelOrnoc::initializeClusters()
@@ -312,8 +648,7 @@ void NetworkModelOrnoc::initializeClusters()
 		   if (line.size() != (UInt32)num_clusters)
 			   break;
 
-		   for(string::size_type i = 0; i < line.size(); i++)
-		   {
+		   for(string::size_type i = 0; i < line.size(); i++){
 			   row.push_back(line[i] == '1');
 		   }
 		   connectvitiy_matrix.push_back(row);
@@ -325,9 +660,8 @@ void NetworkModelOrnoc::initializeClusters()
 	   	         "Number of rows in connectivity matrix file (%i) must be equal to cluster size (%i)",
 	   	      connectvitiy_matrix.size(), num_clusters);
 
-
 	   // "stupid" algorithm (first come, first serve )
-	   vector<Ring> rings;
+	   rings.clear();
 	   rings.push_back(Ring(0, true, num_clusters, max_wavelengths_per_ring));
 
 	   for(UInt32 i = 0; i < connectvitiy_matrix.size(); i++){
@@ -361,26 +695,26 @@ void NetworkModelOrnoc::initializeClusters()
 		   }
 	   }
 
-	   // printout of ORNoC structure
-	   cout << endl << "ORNoC structure:" << endl;
-	   for (auto rit = rings.begin(); rit != rings.end(); rit++){
-		   auto &r = *rit;
-		   cout << "Ring ID: " << r.id << endl;
-		   cout << "Portions:" << endl;
+	   // details printout
+	   if (verbose_output){
+		   cout << endl << "ORNoC structure:" << endl;
+		   for (auto rit = rings.begin(); rit != rings.end(); rit++){
+			   auto &r = *rit;
+			   cout << "Ring ID: " << r.id << endl;
+			   cout << "Portions:" << endl;
 
-		   for (auto pit = r.portions.begin(); pit != r.portions.end(); pit++){
-			   auto &p = *pit;
-			   cout << "	Portion # " << (pit - r.portions.begin()) << endl;
-			   cout << "		Reserved wavelengths: ";
-			   for (auto wit = p.wavelengths.begin(); wit != p.wavelengths.end(); wit++){
-				   if ((*wit).reserved)
-					   cout << (*wit).wavelength_id << " ";
+			   for (auto pit = r.portions.begin(); pit != r.portions.end(); pit++){
+				   auto &p = *pit;
+				   cout << "	Portion # " << (pit - r.portions.begin()) << endl;
+				   cout << "		Reserved wavelengths: ";
+				   for (auto wit = p.wavelengths.begin(); wit != p.wavelengths.end(); wit++){
+					   if ((*wit).reserved)
+						   cout << (*wit).wavelength_id << " ";
+				   }
+				   cout << endl;
 			   }
-			   cout << endl;
 		   }
 	   }
-
-
 }
 
 SInt32 NetworkModelOrnoc::availableWavelength(vector<Ring::Portion>& portions, SInt32 source_id, SInt32 target_id, bool clockwise)
@@ -426,12 +760,13 @@ void NetworkModelOrnoc::initializeAccessPointList(SInt32 cluster_id)
    }
 }
 
+//TODO
 NetworkModelOrnoc::ReceiveNetworkType NetworkModelOrnoc::parseReceiveNetType(string str)
 {
 	// TODO
 	return BROADCAST;
 }
-
+//TODO
 NetworkModelOrnoc::RoutingStrategy NetworkModelOrnoc::parseRoutingStrategy(string strategy)
 {
 	// TODO
@@ -450,19 +785,99 @@ tile_id_t NetworkModelOrnoc::getNearestAccessPoint(tile_id_t tile_id)
    return cluster_info_list[cluster_id].access_point_list[sub_cluster_id];
 }
 
-SInt32 NetworkModelOrnoc::getClusterID(tile_id_t tile_id)
+tile_id_t NetworkModelOrnoc::getTileIDWithOpticalHub(SInt32 cluster_id)
 {
    // consider a mesh formed by the clusters
-   SInt32 cluster_mesh_width;
-   cluster_mesh_width = enet_width_per_layer / cluster_width_per_layer;
-
-   SInt32 tile_x, tile_y;
-   computePositionOnENet(tile_id, tile_x, tile_y);
+   SInt32 cluster_mesh_width_per_layer;
+   SInt32 layer_id;
+   cluster_mesh_width_per_layer = enet_width_per_layer / cluster_width_per_layer;
+   layer_id = cluster_id / num_clusters_per_layer;
 
    SInt32 cluster_pos_x, cluster_pos_y;
-   cluster_pos_x = tile_x / _cluster_width;
-   cluster_pos_y = tile_y / _cluster_height;
+   cluster_pos_x = (cluster_id % cluster_mesh_width_per_layer);
+   cluster_pos_y = ((cluster_id % num_clusters_per_layer) / cluster_mesh_width_per_layer);
 
-   return (cluster_pos_y * cluster_mesh_width + cluster_pos_x);
+   SInt32 optical_hub_x, optical_hub_y;
+   optical_hub_x = (cluster_pos_x * cluster_width_per_layer) + (cluster_width_per_layer / 2);
+   optical_hub_y = (cluster_pos_y * cluster_height_per_layer) + (cluster_height_per_layer / 2);
+
+   return ((optical_hub_y * enet_width_per_layer + optical_hub_x) + (layer_id * num_tiles_per_layer));
+}
+
+SInt32 NetworkModelOrnoc::getNumOniSendPorts(cluster_id_t cluster_id)
+{
+	SInt32 num = 0;
+   for (auto rit = rings.begin(); rit != rings.end(); rit++){
+	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+		   if ((*pit).source_cluster_id == cluster_id)
+			   num += 1;
+	   }
+   }
+   return num;
+}
+
+void NetworkModelOrnoc::getClusterSendPortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions)
+{
+   for (auto rit = rings.begin(); rit != rings.end(); rit++){
+	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+		   if ((*pit).source_cluster_id == cluster_id)
+			   portions.push_back((*pit));
+	   }
+   }
+}
+
+SInt32 NetworkModelOrnoc::getNumOniReceivePorts(cluster_id_t cluster_id)
+{
+	SInt32 num = 0;
+   for (auto rit = rings.begin(); rit != rings.end(); rit++){
+	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+		   if ((*pit).target_cluster_id == cluster_id)
+			   num += 1;
+	   }
+   }
+   return num;
+}
+
+bool NetworkModelOrnoc::findONetPath(cluster_id_t source_cluster_id, cluster_id_t target_cluster_id, vector<cluster_id_t>& path)
+{
+	// using Dijkstra’s algorithm
+   if (path.size() == 0)
+	   path.push_back(source_cluster_id);
+
+
+}
+
+void NetworkModelOrnoc::getClusterReceivePortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions)
+{
+   for (auto rit = rings.begin(); rit != rings.end(); rit++){
+	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+		   if ((*pit).target_cluster_id == cluster_id)
+			   portions.push_back((*pit));
+	   }
+   }
+}
+
+SInt32 NetworkModelOrnoc::getClusterID(tile_id_t tile_id)
+{
+   // consider a mesh per layer formed by the clusters
+   SInt32 cluster_mesh_width_per_layer;
+
+   cluster_mesh_width_per_layer = enet_width_per_layer / cluster_width_per_layer;
+
+   SInt32 tile_x, tile_y, layer_id;
+   computePosition(tile_id, tile_x, tile_y, layer_id);
+
+   SInt32 cluster_pos_x, cluster_pos_y;
+   cluster_pos_x = tile_x / cluster_width_per_layer;
+   cluster_pos_y = tile_y / cluster_height_per_layer;
+
+   return ((cluster_pos_y * cluster_mesh_width_per_layer + cluster_pos_x) + (layer_id * num_clusters_per_layer));
+}
+
+void NetworkModelOrnoc::computePosition(tile_id_t tile_id, SInt32& x, SInt32& y, layer_id_t& layer_id)
+{
+   x = tile_id % enet_width_per_layer;
+   y = (tile_id % num_tiles_per_layer) / enet_width_per_layer;
+   layer_id = tile_id / num_tiles_per_layer;
 }
 
