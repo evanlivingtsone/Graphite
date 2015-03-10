@@ -87,7 +87,7 @@ QueueModelHistoryList::computeUsingHistoryList(UInt64 pkt_time, UInt64 processin
          if ((pkt_time - interval.first) >= _min_processing_time)
          {
             _free_interval_list.insert(curr_it, std::make_pair<UInt64,UInt64>(interval.first, pkt_time));
-         }
+         }//
          if ((interval.second - (pkt_time + processing_time)) >= _min_processing_time)
          {
             _free_interval_list.insert(curr_it, std::make_pair<UInt64,UInt64>(pkt_time + processing_time, interval.second));

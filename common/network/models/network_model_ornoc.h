@@ -197,7 +197,7 @@ private:
 	   static void getClusterSendPortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions);
 	   static void getClusterReceivePortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions);
 
-	   static bool NetworkModelOrnoc::findONetPath(cluster_id_t source_cluster_id, cluster_id_t target_cluster_id, vector<cluster_id_t>& path);
+	   static bool findONetPath(cluster_id_t source_cluster_id, cluster_id_t target_cluster_id, vector<cluster_id_t>& path);
 
 	   static cluster_id_t getClusterID(tile_id_t tile_id);
 	   static SInt32 getSubClusterID(tile_id_t tile_id);
@@ -215,6 +215,7 @@ private:
 
 	   static SInt32 computeNumHopsOnENet(tile_id_t sender, tile_id_t receiver);
 	   static void computePosition(tile_id_t tile_id, SInt32& x, SInt32& y, layer_id_t& layer_id);
+	   static SInt32 computeLayerID(tile_id_t tile_id);
 	   static tile_id_t computeTileID(SInt32 x, SInt32 y, SInt32 l);
 	   static SInt32 computeReceiveNetID(tile_id_t sender);
 

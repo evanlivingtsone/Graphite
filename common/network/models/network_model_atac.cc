@@ -119,6 +119,7 @@ NetworkModelAtac::initializeANetTopologyParams()
    _num_sub_clusters = _num_access_points_per_cluster;
    LOG_ASSERT_ERROR(isPower2(_num_access_points_per_cluster),
          "Number of Optical Access Points(%i) must be a power of 2", _num_access_points_per_cluster);
+
    _enet_width = (SInt32) floor(sqrt(num_application_tiles));
    _enet_height = _enet_width;
    

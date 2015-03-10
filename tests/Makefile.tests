@@ -28,7 +28,7 @@ include $(SIM_ROOT)/Makefile.config
 
 # Debug Graphite or the application or nothing
 # Set to 'graphite' for debugging Graphite, 'app' for debugging the application, 'none' for debugging nothing
-DEBUG ?= graphite
+DEBUG ?= app
 
 # Set to 'build' to just build the application and not run anything
 BUILD_MODE ?=
@@ -57,7 +57,7 @@ OUTPUT_DIR ?= $(shell date +%Y-%m-%d_%H-%M-%S)
 VALGRIND = # valgrind --leak-check=yes
 
 ifeq ($(DEBUG),graphite)
-	PIN_DEBUG_FLAGS = -pause_tool 10
+	PIN_DEBUG_FLAGS = -pause_tool 20
 else
 ifeq ($(DEBUG),app)
 	PIN_DEBUG_FLAGS = -appdebug
