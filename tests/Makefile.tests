@@ -57,7 +57,7 @@ OUTPUT_DIR ?= $(shell date +%Y-%m-%d_%H-%M-%S)
 VALGRIND = # valgrind --leak-check=yes
 
 ifeq ($(DEBUG),graphite)
-	PIN_DEBUG_FLAGS = -pause_tool 20
+	PIN_DEBUG_FLAGS = -pause_tool 10
 else
 ifeq ($(DEBUG),app)
 	PIN_DEBUG_FLAGS = -appdebug

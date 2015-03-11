@@ -37,8 +37,9 @@ ifeq ($(DBG),true)
 	DBG_FLAGS = -ggdb
 	OPT_FLAGS = -O0
 else
-	DBG_FLAGS = -ggdb
-	OPT_FLAGS = -O0
+#	DBG_FLAGS = -ggdb
+#	OPT_FLAGS = -O0
+	OPT_FLAGS = -O2
 endif
 
 KERNEL = SQUEEZE
