@@ -28,7 +28,7 @@ include $(SIM_ROOT)/Makefile.config
 
 # Debug Graphite or the application or nothing
 # Set to 'graphite' for debugging Graphite, 'app' for debugging the application, 'none' for debugging nothing
-DEBUG ?= none
+DEBUG ?= app
 
 # Set to 'build' to just build the application and not run anything
 BUILD_MODE ?=
