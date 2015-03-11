@@ -55,7 +55,7 @@ LD_LIBS += -lboost_filesystem-$(BOOST_SUFFIX) -lboost_system-$(BOOST_SUFFIX)
 # Include paths
 CXXFLAGS += $(foreach dir,$(INCLUDE_DIRECTORIES),-I$(dir)) \
             -Wall -Werror -Wno-deprecated-declarations -Wno-unknown-pragmas \
-		$(DBG_FLAGS) $(OPT_FLAGS) -fPIC -DKERNEL_$(KERNEL) -std=c++0x
+		$(DBG_FLAGS) $(OPT_FLAGS) -fPIC -DKERNEL_$(KERNEL) -std=c++11
 
 # Build rules for dependency generation
 %.d: %.cpp
