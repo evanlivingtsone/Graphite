@@ -31,7 +31,7 @@ INCLUDE_DIRECTORIES = $(DIRECTORIES)												\
 CLEAN=$(findstring clean,$(MAKECMDGOALS))
 
 # Debug Graphite & Application: Set to 'true' to debug, 'false' not to debug
-DBG = false
+DBG = true
 
 ifeq ($(DBG),true)
 	DBG_FLAGS = -ggdb
