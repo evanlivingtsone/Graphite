@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Evan Livingstone 
+# Script for automating graphite debugging process.
+
+
+# Example output from make command for graphite debugging:
+# 	Pausing to attach to pid 18239
+# 	To load the tool's debug info to gdb use:
+#   		add-symbol-file /home/flute/Documents/graphite/graphite_source/tests/apps/ping_pong/../../../lib/pin_sim.so 0x2af9c90e4050 -s .data 0x2af9c992aa40 -s .bss 0x2af9c99365c0
+
+
+
+##### Functions
+
+usage()
+{
+	# Usage examples:
+	# graphdbg -a hello_world 
+	# graphdbg -g radix
+	echo "usage: graphdbg -g ping_pong"
+}
+
+
+##### Main
+
+test_name=
+test_type=
+pinbin_path=~/Documents/graphite/tools/pin-2.13-62141-gcc.4.4.7-linux/intel64/bin/pinbin
+
+if [ "$1" == "" ]; then 
+	echo "Must provide at least one parameter..."
+	usage
+	exit 1
+fi
+
+while [ "$1" != "" ]; do
+	case $1 in
+		-a | --application ) 	shift
+					test_name=$1
+					test_type="application"	
+					;;
+		-g | --graphite ) 	shift 
+					test_name=$1
+					test_type="graphite"			
+					;;
+		-h | --help ) 		usage
+					exit
+					;;
+		* )			usage
+					exit 1
+	esac
+	shift		
+done 
+
+# currently there is only one command line option
+
+if [ -n "$test_name" ]; then
+	pid=
+	appname=
+	gdbcmd=
+	symbcmd=
+	case $test_type in
+		application ) 	make "$test_name" | tee >(
+				while IFS= read -r line; do
+					if [[ $line == *"target remote"* ]]; then 
+						pid=$(sed 's/.*target remote :\([0-9]*\).*/\1/' <<< "$line")
+						echo "DETECTED PID: $pid"
+						appname=$(sed 's/\(.*\)_app_test/\1/' <<< "$test_name")
+						gdbcmd="gdb tests/apps/$appname/$appname -ex \"target remote :$pid;\" -tui"
+						echo "GDB COMMAND IS: $gdbcmd"
+						sudo gnome-terminal -e "$gdbcmd" &>/dev/null & disown -a
+					fi
+				done)
+				;;
+		graphite )	make "$test_name" | tee >(
+				while IFS= read -r line; do
+					if [[ $line == *"Pausing to attach to pid"* ]]; then 
+						pid=$(sed 's/.*Pausing to attach to pid \([0-9]*\).*/\1/' <<< "$line")
+						echo "DETECTED PID: $pid"
+					elif [[ $line == *"add-symbol-file"* ]]; then
+						if [ -z "$pid" ]; then 
+							echo "PID NOT FOUND... EXITING"
+							exit 1
+						fi
+						# strip line of leading spaces
+						symbcmd=$(sed 's/^[[:space:]]\+//' <<< "$line")
+						echo "DETECTED SYMB CMD: "$symbcmd""
+						gdbcmd="gdb $pinbin_path -ex \"attach $pid\" -ex \"$symbcmd\" -tui"
+						echo "GDBCMD COMMAND IS: $gdbcmd"
+						sudo gnome-terminal --maximize -e "$gdbcmd" &>/dev/null & disown -a
+					fi
+				done)
+				;;
+		* )		usage
+				exit 1
+				;;
+	esac
+fi
+
+exit 0
+
+
+
+
+
+
+# RECORD OF FAILED ATTEMPTS:
+
+#1
+#make hello_world_app_test|tee > (read -r cmd; xterm -e "gdb -ex "$cmd"" &>/dev/null & disown -a;)
+
+#2
+#ping google.com|tee >(read -r line; echo "THIS IS READ: $line")
+
+#3
+#ping google.com >(tee while read line;do;echo "Reading command output in loop: $line";done)
+
+#3
+#ping google.com |tee
+#  while IFS= read -r line
+#  do
+#    echo  "READING: $line"
+#  done
+
+
+#4
+# redirect command stdin to fd 3 
+#exec 3< <(ping google.com)
+# read output line by line 
+#while read line; do
+#	echo "Current read line is: '$line'"
+#	
+#	case "$line" in 
+#		*bytes*)
+#		# do stuff
+#		echo "'$line' contains bytes. Exiting loop."
+#		found=1
+#		break
+#		;;
+#	esac
+#done <&3 
+#
+# close file descriptor 3
+#exec 3<&-
+#
+#if [ "$found" = "1" ]; then 
+#	exit 0 #success
+#else 
+#	exit 1 #failure
+#fi 
+
+
+#5 (works)
+
+#echo Starting script...
+#
+#timeout 10s ping google.com | tee >(while IFS= read -r line; do echo "# $line" > tmp_file; done;)
+#
+#exit 0
+

@@ -124,11 +124,11 @@ private:
 
 	   // sub clusters
 	   static SInt32 num_access_points_per_cluster;
-	   static SInt32 num_sub_clusters;
-	   static SInt32 numX_sub_clusters;
-	   static SInt32 numY_sub_clusters;
-	   static SInt32 sub_cluster_width;
-	   static SInt32 sub_cluster_height;
+	   static SInt32 num_sub_clusters_per_layer;
+	   static SInt32 numX_sub_clusters_per_layer;
+	   static SInt32 numY_sub_clusters_per_layer;
+	   static SInt32 sub_cluster_width_per_layer;
+	   static SInt32 sub_cluster_height_per_layer;
 
 	   //
 

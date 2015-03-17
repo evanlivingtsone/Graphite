@@ -34,11 +34,11 @@ SInt32 NetworkModelOrnoc::cluster_height_per_layer;
 
 // sub clusters
 SInt32 NetworkModelOrnoc::num_access_points_per_cluster;
-SInt32 NetworkModelOrnoc::num_sub_clusters;
-SInt32 NetworkModelOrnoc::numX_sub_clusters;
-SInt32 NetworkModelOrnoc::numY_sub_clusters;
-SInt32 NetworkModelOrnoc::sub_cluster_width;
-SInt32 NetworkModelOrnoc::sub_cluster_height;
+SInt32 NetworkModelOrnoc::num_sub_clusters_per_layer;
+SInt32 NetworkModelOrnoc::numX_sub_clusters_per_layer;
+SInt32 NetworkModelOrnoc::numY_sub_clusters_per_layer;
+SInt32 NetworkModelOrnoc::sub_cluster_width_per_layer;
+SInt32 NetworkModelOrnoc::sub_cluster_height_per_layer;
 
 vector<NetworkModelOrnoc::Ring> NetworkModelOrnoc::rings;
 vector<NetworkModelOrnoc::ClusterInfo> NetworkModelOrnoc::cluster_info_list;
@@ -132,7 +132,7 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	   LOG_ASSERT_ERROR(isPerfectSquare(num_application_tiles),
 	         "Num Application Tiles(%i) must be a perfect square", num_application_tiles);
 	   LOG_ASSERT_ERROR(isPower2(num_application_tiles),
-	         "Num Application Tiles(%i) must be a power of 2", num_application_tiles);
+	         "Num Application Tiles(%i) _num_sub_clustersmust be a power of 2", num_application_tiles);
 	   LOG_ASSERT_ERROR(isPower2(cluster_size),
 	         "Cluster Size(%i) must be a power of 2", cluster_size);
 	   LOG_ASSERT_ERROR((num_application_tiles % cluster_size) == 0,
@@ -148,7 +148,7 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 
 	   num_tiles_per_layer = num_clusters_per_layer * cluster_size;
 
-	   num_sub_clusters = num_access_points_per_cluster;
+	   num_sub_clusters_per_layer = num_access_points_per_cluster;
 	   LOG_ASSERT_ERROR(isPower2(num_access_points_per_cluster),
 	         "Number of Optical Access Points(%i) must be a power of 2", num_access_points_per_cluster);
 
@@ -270,16 +270,28 @@ void NetworkModelOrnoc::createRNetRouterAndLinkModels()
                                            _flit_width,
                                            contention_model_enabled, contention_model_type);
 
-      // todo: receive net etc
+      // receive network
+      if (receive_network_type == BROADCAST) {
+    	  double btree_link_length = _tile_width * cluster_size;
+    	  btree_link_list.resize(num_receive_networks_per_cluster);
+		  for (SInt32 i = 0; i < num_receive_networks_per_cluster; i++) {
+			 btree_link_list[i] = new ElectricalLinkModel(this, electrical_link_type,
+														   _frequency, _voltage,
+														   btree_link_length, _flit_width);
+			 assert(btree_link_list[i]->getDelay() == 1);
+		  }
+      }
+      // TODO: finish -> star network
 
   } // tile_id with optical hub
 
 }
 
-//TODO
+
 void NetworkModelOrnoc::destroyRNetRouterAndLinkModels()
 {
-   if (isSystemTile(_tile_id))
+	//TODO: ensure everything get cleaned up
+	if (isSystemTile(_tile_id))
 	  return;
 
    delete injection_router;
@@ -359,8 +371,8 @@ NetworkModelOrnoc::Route NetworkModelOrnoc::computeGlobalRoute(tile_id_t sender,
 	  if (getClusterID(sender) == getClusterID(receiver))
 		  return ENET;
 	  else if (routing_strategy == ISOLATED_CLUSTERS)
-		  //temp: assume that every cluster has ONI
-		  return ONET;
+		  //TODO: for now any layer communication is all ENET
+		  return ENET;
 	  else {
 		  // TODO
 		  // routing_strategy == distance_based
@@ -557,12 +569,17 @@ void NetworkModelOrnoc::initializeClusters()
 		   numY_clusters_per_layer = sqrt(num_clusters_per_layer * 2);
 	   }
 
-	   // TODO >
-	   //enet_width_per_layer = numX_clusters_per_layer * num
-	   enet_height_per_layer = enet_width_per_layer;
+	   if (isEven(floorLog2(cluster_size))) {
+		   cluster_width_per_layer = sqrt(cluster_size);
+		   cluster_height_per_layer = sqrt(cluster_size);
+	   }
+	   else {
+		   cluster_width_per_layer = sqrt(cluster_size / 2);
+		   cluster_height_per_layer = sqrt(cluster_size * 2);
+	   }
 
-	   cluster_width_per_layer = enet_width_per_layer / numX_clusters_per_layer;
-	   cluster_height_per_layer = enet_height_per_layer / numY_clusters_per_layer;
+	   enet_width_per_layer = numX_clusters_per_layer * cluster_width_per_layer;
+	   enet_height_per_layer = numY_clusters_per_layer * cluster_height_per_layer;
 
 	   // initialize cluster ids and boundaries
 	   for (SInt32 l = 0; l < num_layers; l++) {
@@ -580,16 +597,16 @@ void NetworkModelOrnoc::initializeClusters()
 
 	   // sub clusters
 
-	   if (isEven(floorLog2(num_sub_clusters))){
-	      numX_sub_clusters = sqrt(num_sub_clusters);
-	      numY_sub_clusters = sqrt(num_sub_clusters);
+	   if (isEven(floorLog2(num_sub_clusters_per_layer))){
+	      numX_sub_clusters_per_layer = sqrt(num_sub_clusters_per_layer);
+	      numY_sub_clusters_per_layer = sqrt(num_sub_clusters_per_layer);
 	   }
 	   else{
-	      numX_sub_clusters = sqrt(num_sub_clusters * 2);
-	      numY_sub_clusters = sqrt(num_sub_clusters / 2);
+	      numX_sub_clusters_per_layer = sqrt(num_sub_clusters_per_layer * 2);
+	      numY_sub_clusters_per_layer = sqrt(num_sub_clusters_per_layer / 2);
 	   }
-	   sub_cluster_width = cluster_width_per_layer / numX_sub_clusters;
-	   sub_cluster_height = cluster_height_per_layer / numY_sub_clusters;
+	   sub_cluster_width_per_layer = cluster_width_per_layer / numX_sub_clusters_per_layer;
+	   sub_cluster_height_per_layer = cluster_height_per_layer / numY_sub_clusters_per_layer;
 
 	   // initialize access point list
 	   for (SInt32 i = 0; i < num_clusters; i++){
@@ -709,17 +726,16 @@ SInt32 NetworkModelOrnoc::availableWavelength(vector<Ring::Portion>& portions, S
 void NetworkModelOrnoc::initializeAccessPointList(SInt32 cluster_id)
 {
    ClusterInfo::Boundary& boundary = cluster_info_list[cluster_id].boundary;
-   for (SInt32 y = 0; y < numY_sub_clusters; y++){
-	  for (SInt32 x = 0; x < numX_sub_clusters; x++){
-		 SInt32 access_point_x = boundary.minX + (x * sub_cluster_width) + (sub_cluster_width / 2);
-		 SInt32 access_point_y = boundary.minY + (y * sub_cluster_height) + (sub_cluster_height / 2);
+   for (SInt32 y = 0; y < numY_sub_clusters_per_layer; y++){
+	  for (SInt32 x = 0; x < numX_sub_clusters_per_layer; x++){
+		 SInt32 access_point_x = boundary.minX + (x * sub_cluster_width_per_layer) + (sub_cluster_width_per_layer / 2);
+		 SInt32 access_point_y = boundary.minY + (y * sub_cluster_height_per_layer) + (sub_cluster_height_per_layer / 2);
 		 tile_id_t access_point_id = access_point_y * enet_width_per_layer + access_point_x;
 		 cluster_info_list[cluster_id].access_point_list.push_back(access_point_id);
 	  }
    }
 }
 
-//TODO
 NetworkModelOrnoc::ReceiveNetworkType NetworkModelOrnoc::parseReceiveNetType(string str)
 {
    if (str == "btree")
@@ -732,7 +748,6 @@ NetworkModelOrnoc::ReceiveNetworkType NetworkModelOrnoc::parseReceiveNetType(str
    }
 }
 
-//TODO
 NetworkModelOrnoc::RoutingStrategy NetworkModelOrnoc::parseRoutingStrategy(string strategy)
 {
 	// TODO
@@ -754,14 +769,12 @@ tile_id_t NetworkModelOrnoc::getNearestAccessPoint(tile_id_t tile_id)
 tile_id_t NetworkModelOrnoc::getTileIDWithOpticalHub(SInt32 cluster_id)
 {
    // consider a mesh formed by the clusters
-   SInt32 cluster_mesh_width_per_layer;
    SInt32 layer_id;
-   cluster_mesh_width_per_layer = enet_width_per_layer / cluster_width_per_layer;
    layer_id = cluster_id / num_clusters_per_layer;
 
    SInt32 cluster_pos_x, cluster_pos_y;
-   cluster_pos_x = (cluster_id % cluster_mesh_width_per_layer);
-   cluster_pos_y = ((cluster_id % num_clusters_per_layer) / cluster_mesh_width_per_layer);
+   cluster_pos_x = cluster_id % cluster_width_per_layer;
+   cluster_pos_y = (cluster_id % num_clusters_per_layer) / cluster_width_per_layer;
 
    SInt32 optical_hub_x, optical_hub_y;
    optical_hub_x = (cluster_pos_x * cluster_width_per_layer) + (cluster_width_per_layer / 2);
@@ -773,28 +786,26 @@ tile_id_t NetworkModelOrnoc::getTileIDWithOpticalHub(SInt32 cluster_id)
 void
 NetworkModelOrnoc::getTileIDListInCluster(SInt32 cluster_id, vector<tile_id_t>& tile_id_list)
 {
+	SInt32 layer_id;
+	SInt32 cluster_pos_x, cluster_pos_y;
+	SInt32 core_x, core_y;
 
-	//TODO
-//   SInt32 cluster_mesh_width;
-//   cluster_mesh_width = _enet_width / _cluster_width;
-//
-//   SInt32 cluster_pos_x, cluster_pos_y;
-//   cluster_pos_x = cluster_id % cluster_mesh_width;
-//   cluster_pos_y = cluster_id / cluster_mesh_width;
-//
-//   SInt32 core_x, core_y;
-//   core_x = cluster_pos_x * _cluster_width;
-//   core_y = cluster_pos_y * _cluster_height;
-//
-//   for (SInt32 i = core_x; i < core_x + _cluster_width; i++)
-//   {
-//      for (SInt32 j = core_y; j < core_y + _cluster_height; j++)
-//      {
-//         SInt32 tile_id = j * _enet_width + i;
-//         assert (tile_id < (SInt32) Config::getSingleton()->getApplicationTiles());
-//         tile_id_list.push_back(tile_id);
-//      }
-//   }
+	layer_id = cluster_id / num_clusters_per_layer;
+	cluster_pos_x = cluster_id % cluster_width_per_layer;
+	cluster_pos_y = (cluster_id % num_clusters_per_layer) / cluster_width_per_layer;
+
+	core_x = (cluster_pos_x * cluster_width_per_layer) + (layer_id * num_tiles_per_layer);
+	core_y = (cluster_pos_y * cluster_height_per_layer);
+
+   for (SInt32 i = core_x; i < core_x + cluster_width_per_layer; i++)
+   {
+      for (SInt32 j = core_y; j < core_y + cluster_height_per_layer; j++)
+      {
+         SInt32 tile_id = (j * enet_width_per_layer + i) + (layer_id * num_tiles_per_layer);
+         assert (tile_id < (SInt32) Config::getSingleton()->getApplicationTiles());
+         tile_id_list.push_back(tile_id);
+      }
+   }
 }
 
 SInt32 NetworkModelOrnoc::getNumOniSendPorts(cluster_id_t cluster_id)
@@ -866,17 +877,15 @@ SInt32 NetworkModelOrnoc::getClusterID(tile_id_t tile_id)
 
 SInt32 NetworkModelOrnoc::getSubClusterID(tile_id_t tile_id)
 {
-	//TODO
-	return 0;
-//   SInt32 cx, cy;
-//   computePositionOnENet(tile_id, cx, cy);
-//
-//   SInt32 cluster_id = getClusterID(tile_id);
-//   // Get the cluster boundary
-//   ClusterInfo::Boundary& boundary = _cluster_info_list[cluster_id]._boundary;
-//   SInt32 pos_x = (cx - boundary.minX) / _sub_cluster_width;
-//   SInt32 pos_y = (cy - boundary.minY) / _sub_cluster_height;
-//   return (pos_y * _numX_sub_clusters) + pos_x;
+	SInt32 cx, cy, cl;
+	computePosition(tile_id, cx, cy, cl);
+
+	SInt32 cluster_id = getClusterID(tile_id);
+	ClusterInfo::Boundary& boundary = cluster_info_list[cluster_id].boundary;
+
+	SInt32 pos_x = (cx - boundary.minX) / sub_cluster_width_per_layer;
+	SInt32 pos_y = (cy - boundary.minY) / sub_cluster_height_per_layer;
+	return (pos_y * numX_sub_clusters_per_layer) + pos_x;
 }
 
 void NetworkModelOrnoc::computePosition(tile_id_t tile_id, SInt32& x, SInt32& y, layer_id_t& layer_id)
@@ -893,32 +902,31 @@ SInt32 NetworkModelOrnoc::computeLayerID(tile_id_t tile_id)
 
 double NetworkModelOrnoc::computeOpticalLinkLength()
 {
-	//TODO
-	return 0;
-//   // Note that number of clusters must be 'positive' and 'power of 2'
-//   // 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
-//
-//   if (_num_clusters == 2)
-//   {
-//      // Assume that optical link connects the mid-point of the clusters
-//      return (_cluster_height * _tile_width);
-//   }
-//   else if (_num_clusters == 4)
-//   {
-//      // Assume that optical link passes through mid-point of the clusters
-//      return (_cluster_width * _tile_width) * (_cluster_height * _tile_width);
-//   }
-//   else if (_num_clusters == 8)
-//   {
-//      return (_cluster_width * _tile_width) * (2 * _cluster_height * _tile_width);
-//   }
-//   else
-//   {
-//      // Assume that optical link passes through the edges of the clusters
-//      double length_rectangle = (_numX_clusters-2) * _cluster_width * _tile_width;
-//      double height_rectangle = (_cluster_height*2) * _tile_width;
-//      SInt32 num_rectangles = _numY_clusters/4;
-//      return (num_rectangles * 2 * (length_rectangle + height_rectangle));
-//   }
+	//TODO - change this
+	// Note that number of clusters must be 'positive' and 'power of 2'
+	// 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
+
+	if (num_clusters_per_layer == 2)
+	{
+	  // Assume that optical link connects the mid-point of the clusters
+	  return (cluster_height_per_layer * _tile_width);
+	}
+	else if (num_clusters_per_layer == 4)
+	{
+	  // Assume that optical link passes through mid-point of the clusters
+	  return (cluster_width_per_layer * _tile_width) * (cluster_height_per_layer * _tile_width);
+	}
+	else if (num_clusters_per_layer == 8)
+	{
+	  return (cluster_width_per_layer * _tile_width) * (2 * cluster_height_per_layer * _tile_width);
+	}
+	else
+	{
+	  // Assume that optical link passes through the edges of the clusters
+	  double length_rectangle = (numX_clusters_per_layer-2) * cluster_width_per_layer * _tile_width;
+	  double height_rectangle = (cluster_height_per_layer*2) * _tile_width;
+	  SInt32 num_rectangles = numY_clusters_per_layer/4;
+	  return (num_rectangles * 2 * (length_rectangle + height_rectangle));
+	}
 }
 
