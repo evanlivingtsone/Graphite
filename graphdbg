@@ -139,8 +139,18 @@ debug_graphite()
 		exit 1
 	fi
 	
-	if [ -z "$pinbin_path" ]; then
-		echo "Error: must set pinbin path in the script file before running."
+	# retrieve pinbin path from make config file - do not source (.) file	
+	
+	pinbin_path=
+	while read line; do
+		if [[ $line == "PIN_HOME ="* ]]; then
+			pinbin_path="$(sed "s/^PIN_HOME *= *\(.*\)$/\1/" <<<$line)/intel64/bin/pinbin"
+			break
+		fi 
+	done < "$graphite_dir/Makefile.config"
+	
+	if [[ -z $pinbin_path ]]; then
+		echo "Error: pin home path was not found in $graphite_dir/Makefile.config"
 		exit 1
 	fi
 	
@@ -201,7 +211,6 @@ debug_application()
 test_name=
 debug_type=
 configure_type=
-pinbin_path=~/Documents/graphite/tools/pin-2.13-62141-gcc.4.4.7-linux/intel64/bin/pinbin
 graphite_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
 if [ "$1" == "" ]; then 
