@@ -42,9 +42,9 @@ usage()
 {
 	echo "Usage: 
 		For debugging a Graphite model: graphdbg -g ping_pong_app_test
-		For debugging an application:	graphdbg -a ping_pong_app_test
+		For debugging an application:	graphdbg -a barnes_bench_test
 	
-		For configuration: graphdbg configure [graphite/application/reset]"
+		For configuration: graphdbg configure [ (graph)ite | (app)lication | reset ]"
 }
 
 configure_graphite()
@@ -74,7 +74,7 @@ configure_reset()
 configure_rm_tmps()
 {
 	command=r
-	echo -n "Delete temporary files? (y/n): "
+	echo -n "Delete temporary backup files? (y/n): "
 	read command
 	if [ "$command" == 'y' ]; then
 		rm "$graphite_dir/common/Makefile.common.tmp"
@@ -138,7 +138,7 @@ debug_graphite()
 		echo "Internal error. Check script."
 		exit 1
 	fi
-
+	
 	if [ -z "$pinbin_path" ]; then
 		echo "Error: must set pinbin path in the script file before running."
 		exit 1
@@ -163,6 +163,7 @@ debug_graphite()
 				#echo "GDBCMD COMMAND IS: $gdbcmd"
 				
 				sudo gnome-terminal --maximize -e "$gdbcmd" &>/dev/null & disown -a
+				break
 			fi
 		done)
 }
@@ -171,18 +172,19 @@ debug_application()
 {
 	verify_mode a
 	
-	if [[ $? != 0 ]]; then 
+	if [[ $? != 0 ]] || [[ -z $1 ]]; then 
 		echo "Internal error. Check script."
 		exit 1
 	fi
+	
+	appname=$1
 	
 	make "$test_name" | tee >(
 		while IFS= read -r line; do
 			if [[ $line == *"target remote"* ]]; then 
 				pid=$(sed 's/.*target remote :\([0-9]*\).*/\1/' <<< "$line")
-				echo "DETECTED PID: $pid"
+				#echo "DETECTED PID: $pid"
 				
-				appname=$(sed 's/\(.*\)_app_test/\1/' <<< "$test_name")
 				gdbcmd="gdb tests/apps/$appname/$appname -ex \"target remote :$pid;\" -tui"
 				echo "GDB COMMAND IS: $gdbcmd"
 				
@@ -197,7 +199,7 @@ debug_application()
 ##### Main
 
 test_name=
-test_type=
+debug_type=
 configure_type=
 pinbin_path=~/Documents/graphite/tools/pin-2.13-62141-gcc.4.4.7-linux/intel64/bin/pinbin
 graphite_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
@@ -212,11 +214,11 @@ while [ "$1" != "" ]; do
 	case $1 in
 		-a | --application ) 	shift
 					test_name=$1
-					test_type="application"	
+					debug_type="application"	
 					;;
 		-g | --graphite ) 	shift 
 					test_name=$1
-					test_type="graphite"			
+					debug_type="graphite"			
 					;;
 		configure )		shift
 					configure_type=$1
@@ -237,23 +239,35 @@ if [ -n "$configure_type" ]; then
 	fi
 	
 	case $configure_type in
-		graphite )	configure_graphite
-				;;
-		application )	configure_application
-				;;
-		reset ) 	configure_reset
-				;;
-		* )		usage
-				exit 1
-				;;
+		graph | graphite )	configure_graphite
+					;;
+		app | application)	configure_application
+					;;
+		reset ) 		configure_reset
+					;;
+		* )			usage
+					exit 1
+					;;
 	esac
 		
 fi
 
 if [ -n "$test_name" ]; then
 	
-	case $test_type in
-		application ) 	debug_application
+	# verify and parse test name
+	
+	if [[ $test_name == *_app_test ]]; then
+		appname=$(sed 's/\(.*\)_app_test/\1/' <<< "$test_name")
+	elif [[ $test_name == *_bench_test ]]; then
+		appname=$(sed 's/\(.*\)_bench_test/\1/' <<< "$test_name")
+	else
+		echo "Error: \"$test_name\" is an invalid test name. It must end in \"_app_test\" or \"_bench_test\"."
+		usage
+		exit 1 
+	fi
+
+	case $debug_type in
+		application ) 	debug_application $appname
 				;;
 		graphite )	debug_graphite
 				;;
@@ -264,7 +278,6 @@ if [ -n "$test_name" ]; then
 fi
 
 exit 0
-
 
 
 
