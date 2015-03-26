@@ -369,7 +369,6 @@ NetworkModel::computeMemoryControllerPositions(UInt32 network_type, SInt32 num_m
    switch(network_type)
    {
       case NETWORK_MAGIC:
-      case NETWORK_ORNOC:
       case NETWORK_EMESH_HOP_COUNTER:
          {
             SInt32 spacing_between_memory_controllers = tile_count / num_memory_controllers;
@@ -385,6 +384,9 @@ NetworkModel::computeMemoryControllerPositions(UInt32 network_type, SInt32 num_m
 
       case NETWORK_EMESH_HOP_BY_HOP:
          return NetworkModelEMeshHopByHop::computeMemoryControllerPositions(num_memory_controllers, tile_count);
+
+      case NETWORK_ORNOC:
+    	  return NetworkModelOrnoc::computeMemoryControllerPositions(num_memory_controllers, tile_count);
 
       case NETWORK_ATAC:
          return NetworkModelAtac::computeMemoryControllerPositions(num_memory_controllers, tile_count);
@@ -402,12 +404,16 @@ NetworkModel::computeProcessToTileMapping(UInt32 network_type)
    switch(network_type)
    {
       case NETWORK_MAGIC:
-      case NETWORK_ORNOC:
+
       case NETWORK_EMESH_HOP_COUNTER:
          return make_pair(false, vector<vector<tile_id_t> >());
 
       case NETWORK_EMESH_HOP_BY_HOP:
          return NetworkModelEMeshHopByHop::computeProcessToTileMapping();
+
+      case NETWORK_ORNOC:
+    	  return NetworkModelOrnoc::computeProcessToTileMapping();
+    	  break;
 
       case NETWORK_ATAC:
          return NetworkModelAtac::computeProcessToTileMapping();

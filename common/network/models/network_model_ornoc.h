@@ -21,6 +21,9 @@ public:
 
 	   void routePacket(const NetPacket &pkt, queue<Hop> &nextHops);
 
+	   static pair<bool, vector<tile_id_t> > computeMemoryControllerPositions(SInt32 num_memory_controllers, SInt32 tile_count);
+	   static pair<bool, vector<vector<tile_id_t> > > computeProcessToTileMapping();
+
 private:
 	   typedef SInt32 wavelength_id_t;
 	   typedef SInt32 ring_id_t;
@@ -83,6 +86,7 @@ private:
 		   ring_id_t id;
 		   bool clockwise;
 		   vector<Portion> portions;
+		   vector< vector<wavelength_id_t> > connectivity_matrix;
 	   };
 
 	   // cluster boundaries and access points
@@ -140,7 +144,7 @@ private:
 	   static bool contention_model_enabled;
 	   static bool verbose_output;
 
-	   static vector< vector<bool> > connectvitiy_matrix;
+	   static vector< vector<bool> > connectivity_matrix;
 	   static string connectivity_matrix_path;
 	   static SInt32 num_layers;
 
@@ -179,7 +183,7 @@ private:
 	   static void initializeClusters();
 	   static void initializeAccessPointList(SInt32 cluster_id);
 
-	   static SInt32 availableWavelength(vector<Ring::Portion>& portions, SInt32 source_id, SInt32 target_id, bool clockwise);
+	   static SInt32 availableWavelength(Ring& ring, SInt32 source_id, SInt32 target_id);
 
 	   void createRNetRouterAndLinkModels();
 	   void destroyRNetRouterAndLinkModels();
@@ -201,6 +205,8 @@ private:
 
 	   static cluster_id_t getClusterID(tile_id_t tile_id);
 	   static SInt32 getSubClusterID(tile_id_t tile_id);
+
+	   static void getClusterIDListInLayer(SInt32 layer_id, vector<SInt32>& cluster_id_list);
 	   static void getTileIDListInCluster(cluster_id_t cluster_id, vector<tile_id_t>& tile_id_list);
 
 	   static SInt32 getLayerID(tile_id_t tile_id);

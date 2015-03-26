@@ -1,3 +1,2 @@
-break NetworkModelOrnoc::routePacketOnONet(NetPacket const&, int, int, std::queue<NetworkModel::Hop, std::deque<NetworkModel::Hop, std::allocator<NetworkModel::Hop> > >&)
-break NetworkModelOrnoc::routePacket(NetPacket const&, std::queue<NetworkModel::Hop, std::deque<NetworkModel::Hop, std::allocator<NetworkModel::Hop> > >&)
-break NetworkModelOrnoc::routePacketOnENet(NetPacket const&, int, int, std::queue<NetworkModel::Hop, std::deque<NetworkModel::Hop, std::allocator<NetworkModel::Hop> > >&)
+break NetworkModel::computeMemoryControllerPositions(unsigned int, int, int)
+break NetworkModel::computeProcessToTileMapping(unsigned int)
