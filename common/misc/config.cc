@@ -207,6 +207,7 @@ Config::computeProcessToTileMapping()
          switch(network_model)
          {
          case NETWORK_EMESH_HOP_BY_HOP:
+         case NETWORK_ORNOC:
          case NETWORK_ATAC:
             return process_to_tile_mapping_struct.second;
 

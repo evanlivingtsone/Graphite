@@ -25,10 +25,12 @@ public:
 	   static pair<bool, vector<vector<tile_id_t> > > computeProcessToTileMapping();
 
 private:
+
 	   typedef SInt32 wavelength_id_t;
 	   typedef SInt32 ring_id_t;
 	   typedef SInt32 layer_id_t;
 	   typedef SInt32 cluster_id_t;
+
 
 	   // enumerations
 
@@ -89,6 +91,11 @@ private:
 		   vector< vector<wavelength_id_t> > connectivity_matrix;
 	   };
 
+	   typedef vector<Ring>::iterator rit_t;
+	   typedef vector<wavelength_id_t>::iterator wit_t;
+	   typedef vector< vector<wavelength_id_t> >::iterator cmit_t;
+
+
 	   // cluster boundaries and access points
 	   class ClusterInfo{
 	   public:
@@ -123,8 +130,6 @@ private:
 	   static SInt32 numY_clusters_per_layer;
 	   static SInt32 cluster_width_per_layer;
 	   static SInt32 cluster_height_per_layer;
-	   static vector<ClusterInfo> cluster_info_list;
-	   static vector<Ring> rings;
 
 	   // sub clusters
 	   static SInt32 num_access_points_per_cluster;
@@ -147,6 +152,9 @@ private:
 	   static vector< vector<bool> > connectivity_matrix;
 	   static string connectivity_matrix_path;
 	   static SInt32 num_layers;
+
+	   static vector<ClusterInfo> cluster_info_list;
+	   static vector<Ring> rings;
 
 	   // injection port router
 	   RouterModel* injection_router;
@@ -197,9 +205,6 @@ private:
 
 	   static SInt32 getNumOniSendPorts(cluster_id_t cluster_id);
 	   static SInt32 getNumOniReceivePorts(cluster_id_t cluster_id);
-
-	   static void getClusterSendPortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions);
-	   static void getClusterReceivePortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions);
 
 	   static bool findONetPath(cluster_id_t source_cluster_id, cluster_id_t target_cluster_id, vector<cluster_id_t>& path);
 

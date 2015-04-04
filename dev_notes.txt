@@ -1,0 +1,5 @@
+DEV notes and TODO list
+
+[d] verify destructor
+[] implement waveguide length function
+[] implement same layer optical routing 

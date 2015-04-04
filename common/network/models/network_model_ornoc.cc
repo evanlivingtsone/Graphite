@@ -3,8 +3,6 @@
 
 #include <math.h>
 #include <vector>
-//#include <iostream>
-//#include <fstream>
 using namespace std;
 
 #include "network_model_ornoc.h"
@@ -61,7 +59,7 @@ NetworkModelOrnoc::Ring::Ring(ring_id_t id_, bool clockwise_, SInt32 num_cluster
 	   portions.resize(num_clusters_);
 	   connectivity_matrix.resize(num_clusters_, vector<wavelength_id_t>(num_clusters_, -1));
 
-	   for (auto it = portions.begin(); it != portions.end(); ++it){
+	   for (vector<Portion>::iterator it = portions.begin(); it != portions.end(); ++it){
 		   Portion& p = *it;
 		   p.source_cluster_id = it - portions.begin();
 		   p.target_cluster_id = (p.source_cluster_id + 1) % num_clusters_;
@@ -242,34 +240,50 @@ void NetworkModelOrnoc::createRNetRouterAndLinkModels()
      assert(enet_link_list[i]->getDelay() == 1);
   }
 
-  // instantiate optical send and receive routers
   cluster_id_t cluster_id = getClusterID(_tile_id);
 
   if (_tile_id == getTileIDWithOpticalHub(cluster_id)) {
 
-	  SInt32 num_send_ports = getNumOniSendPorts(cluster_id);
-	  SInt32 num_receive_ports = getNumOniReceivePorts(cluster_id);
+	  // obtain number of waveguides cluster is sending to and receiving from
+	  SInt32 num_send_ports, num_receive_ports = 0;
+	  for (rit_t rit = rings.begin(); rit !=rings.end(); rit++){
+		  // determine number of rings this cluster sends to
+		  for (wit_t wit = (*rit).connectivity_matrix[cluster_id].begin(); wit != (*rit).connectivity_matrix[cluster_id].end(); wit++){
+			  if ((*wit) > -1){
+				  num_send_ports += 1;
+				  break;
+			  }
+		  }
+		  // determine number of clusters this cluster receives from
+		  for (SInt32 i = 0; i != num_clusters; i++){
+			  if ((*rit).connectivity_matrix[i][cluster_id] > -1){
+				  num_receive_ports += 1;
+				  break;
+			  }
+		  }
+	  }
 
       send_hub_router = new RouterModel(this, _frequency, _voltage,
                                          num_access_points_per_cluster, num_send_ports,
                                          num_flits_per_output_buffer_send_hub_router, send_hub_router_delay, _flit_width,
                                          contention_model_enabled, contention_model_type);
 
-      // optical link power models
-      optical_links.resize(num_send_ports);
-      double waveguide_length = computeOpticalLinkLength(); // in mm
-
-      for (SInt32 i = 0; i < num_send_ports; i++) {
-    	  optical_links[i] = new OpticalLinkModel(this, num_clusters_per_layer, _frequency, _voltage, waveguide_length, _flit_width);
-    	  LOG_ASSERT_ERROR(optical_links[i]->getDelay() == 3, "Optical link delay should be 3. Now %llu", optical_links[i]->getDelay());
-      }
-
-      // receive hub router models
       receive_hub_router = new RouterModel(this, _frequency, _voltage,
     		  	  	  	  	  	  	  	   num_receive_ports, num_receive_networks_per_cluster,
                                            num_flits_per_output_buffer_receive_hub_router, receive_hub_router_delay,
                                            _flit_width,
                                            contention_model_enabled, contention_model_type);
+
+      double waveguide_length = computeOpticalLinkLength();
+
+      // each optical link is a wavelength for communication
+      optical_links.resize(num_send_ports);
+      for (SInt32 i = 0; i < num_send_ports; i++) {
+    	  // one reader per wavelength in this model
+          optical_links.push_back(new OpticalLinkModel(this, 1, _frequency, _voltage, waveguide_length, _flit_width));
+    	  LOG_ASSERT_ERROR(optical_links[i]->getDelay() == 3, "Optical link delay should be 3. Now %llu", optical_links[i]->getDelay());
+      }
+
 
       // receive network
       if (receive_network_type == BROADCAST) {
@@ -291,7 +305,8 @@ void NetworkModelOrnoc::createRNetRouterAndLinkModels()
 
 void NetworkModelOrnoc::destroyRNetRouterAndLinkModels()
 {
-	//TODO: ensure everything get cleaned up
+	//TODO: ensure everything gets cleaned up
+
 	if (isSystemTile(_tile_id))
 	  return;
 
@@ -305,19 +320,20 @@ void NetworkModelOrnoc::destroyRNetRouterAndLinkModels()
 	  delete enet_link_list[num_enet_router_ports];
 
    if (_tile_id == getTileIDWithOpticalHub(getClusterID(_tile_id))) {
-	  delete send_hub_router;
+	   delete send_hub_router;
+	   delete receive_hub_router;
 
-	  for (auto it = optical_links.begin(); it != optical_links.end(); it++) {
-		  delete (*it);
-	  }
+	   while (!optical_links.empty()) delete optical_links.back(), optical_links.pop_back();
 
-	  delete receive_hub_router;
+//	   for (vector<OpticalLinkModel>::iterator it = optical_links.begin(); it != optical_links.end(); it++)
+//		   delete *it;
 
-	  // receive network
-	  if (receive_network_type == BROADCAST) {
-		 for (SInt32 i = 0; i < num_receive_networks_per_cluster; i++)
-			delete btree_link_list[i];
-	  }
+	   if (receive_network_type == BROADCAST) {
+		   while (!btree_link_list.empty()) delete btree_link_list.back(), btree_link_list.pop_back();
+
+//		   for (vector<ElectricalLinkModel*>::iterator eit = btree_link_list.begin(); eit != btree_link_list.end(); eit++)
+//			   delete *eit;
+	   }
 	  else {
 // TODO
 
@@ -348,12 +364,12 @@ void NetworkModelOrnoc::routePacket(const NetPacket& pkt, queue<Hop>& next_hops)
 	      next_hops.push(hop);
 	   }
 	   else {
-	      Route computed_route = computeGlobalRoute(pkt_sender, pkt_receiver);
-	      if (computed_route == ENET) {
+	      Route route_type = computeGlobalRoute(pkt_sender, pkt_receiver);
+	      if (route_type == ENET) {
 	         LOG_PRINT("Route: ENET");
 	         routePacketOnENet(pkt, pkt_sender, pkt_receiver, next_hops);
 	      }
-	      else if (computed_route == ONET) {
+	      else if (route_type == ONET) {
 	         LOG_PRINT("Route: ONET");
 	         routePacketOnONet(pkt, pkt_sender, pkt_receiver, next_hops);
 	      }
@@ -362,24 +378,21 @@ void NetworkModelOrnoc::routePacket(const NetPacket& pkt, queue<Hop>& next_hops)
 
 NetworkModelOrnoc::Route NetworkModelOrnoc::computeGlobalRoute(tile_id_t sender, tile_id_t receiver)
 {
-	//determine type of communication required between sender and receiver
+	// should not have broadcast receiver in this model
+	LOG_ASSERT_ERROR(receiver != NetPacket::BROADCAST, "Broadcast not supported by ORNoC.")
 
-   if (receiver == NetPacket::BROADCAST)
-	  return ONET; // should not happen with ORNoC
-
-
-   if (getLayerID(sender) == getLayerID(receiver)) {
-	  if (getClusterID(sender) == getClusterID(receiver))
+	if (getLayerID(sender) == getLayerID(receiver)) {
+		if (getClusterID(sender) == getClusterID(receiver))
 		  return ENET;
 	  else if (routing_strategy == ISOLATED_CLUSTERS)
-		  //TODO: for now any communicatoin within a layer all ENET
+		  //TODO: for now any communication within a layer is electrical
 		  return ENET;
 	  else {
 		  // TODO
 		  // routing_strategy == distance_based
 		  // for now just ENET
-		 // SInt32 num_hops_on_enet = computeNumHopsOnENet(sender, receiver);
-		 //return (num_hops_on_enet <= unicast_distance_threshold) ? ENET : ONET;
+		  // SInt32 num_hops_on_enet = computeNumHopsOnENet(sender, receiver);
+		  //return (num_hops_on_enet <= unicast_distance_threshold) ? ENET : ONET;
 		  return ENET;
 	  }
    }
@@ -395,6 +408,8 @@ void NetworkModelOrnoc::routePacketOnENet(const NetPacket& pkt, tile_id_t sender
    SInt32 cx, cy, cl, dx, dy, dl;
    computePosition(_tile_id, cx, cy, cl);
    computePosition(receiver, dx, dy, dl);
+
+   LOG_ASSERT_ERROR(cl == dl, "Cannot use ENet for inter-layer communication");
 
    NextDest next_dest;
 
@@ -424,7 +439,6 @@ void NetworkModelOrnoc::routePacketOnENet(const NetPacket& pkt, tile_id_t sender
 
 void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender, tile_id_t receiver, queue<Hop>& next_hops)
 {
-
    // packet must be routed to access point via emesh first
    if (pkt.node_type == EMESH) {
 	   // make sure we are within the same cluster
@@ -456,7 +470,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 	 NextDest next_dest;
 	 SInt32 cx, cy, cl, dx, dy, dl;
 	 SInt32	sender_cluster_id, receiver_cluster_id;
-	 SInt32 output_oni, output_wl = -1;
+	 SInt32 output_ring, output_wl = -1;
 
 	 computePosition(_tile_id, cx, cy, cl);
 	 computePosition(receiver, dx, dy, dl);
@@ -476,7 +490,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 			 SInt32 wl = rings[r].connectivity_matrix[sender_cluster_id][receiver_cluster_id];
 			 if (wl > -1) {
 				 output_wl = wl;
-				 output_oni = r;
+				 output_ring = r;
 				 break;
 			 }
 		 }
@@ -493,28 +507,22 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 					 SInt32 wl = rings[r].connectivity_matrix[sender_cluster_id][dest_layer_cluster_list[i]];
 					 if (wl > -1) {
 						 output_wl = wl;
-						 output_oni = r;
+						 output_ring = r;
 						 break;
 					 }
 				 }
 			 }
 		 }
 
-		 LOG_ASSERT_ERROR(output_wl > -1, "Path from sender(%i) to receiver(%i) unavailable - check connectivity matrix",
-		 	   	          sender, receiver);
+		 LOG_ASSERT_ERROR(output_wl > -1, "Path from sender(%i) to receiver(%i) unavailable - check connectivity matrix", sender, receiver);
 
-
-		 // TODO need multiple send hub routers for multiple rings
-		 send_hub_router->processPacket(pkt, output_wl, zero_load_delay, contention_delay);
-		 optical_links[output_wl]->processPacket(pkt, 1, zero_load_delay);
+		 send_hub_router->processPacket(pkt, output_ring, zero_load_delay, contention_delay);
+		 optical_links[output_wl]->processPacket(pkt, 1 /*one dest for ornoc*/, zero_load_delay);
 		 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(receiver)), RECEIVE_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
 		 next_hops.push(hop);
-
-		 //TODO remove this it's just for compilation:
-		 output_wl = output_oni * 2;
-
 	 }
    }
+   // once the packet has been sent on ONet
    else if (pkt.node_type == RECEIVE_HUB) {
 	   //TODO look into this part...
 
@@ -528,7 +536,6 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 	  UInt64 zero_load_delay = 0;
 	  UInt64 contention_delay = 0;
 
-	  // receive Hub Router
 	  // update router event counters, get delay, update dynamic energy
 	  receive_hub_router->processPacket(pkt, receive_net_id, zero_load_delay, contention_delay);
 
@@ -687,8 +694,8 @@ void NetworkModelOrnoc::initializeClusters()
 	   if (verbose_output){
 		   cout << endl << "ORNoC structure:" << endl;
 
-		   for (auto rit = rings.begin(); rit != rings.end(); rit++){
-			   auto &r = *rit;
+		   for (vector<Ring>::iterator rit = rings.begin(); rit != rings.end(); rit++){
+			   Ring r = *rit;
 			   cout << "Ring ID: " << r.id << endl;
 			   for (SInt32 i = 0; i != num_clusters; i++) {
 				   for (SInt32 j = 0; j != num_clusters; j++) {
@@ -874,33 +881,24 @@ void NetworkModelOrnoc::getTileIDListInCluster(SInt32 cluster_id, vector<tile_id
    }
 }
 
+
 SInt32 NetworkModelOrnoc::getNumOniSendPorts(cluster_id_t cluster_id)
 {
-	SInt32 num = 0;
-	for (auto rit = rings.begin(); rit != rings.end(); rit++){
-	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
-		   if ((*pit).source_cluster_id == cluster_id)
-			   num += 1;
-	   }
+	SInt32 num_send_ports = 0;
+	for (rit_t rit = rings.begin(); rit !=rings.end(); rit++){
+		for (wit_t wit = (*rit).connectivity_matrix[cluster_id].begin(); wit != (*rit).connectivity_matrix[cluster_id].end(); wit++){
+			if ((*wit) > -1)
+				num_send_ports += 1;
+		}
 	}
-	return num;
-}
-
-void NetworkModelOrnoc::getClusterSendPortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions)
-{
-	for (auto rit = rings.begin(); rit != rings.end(); rit++){
-	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
-		   if ((*pit).source_cluster_id == cluster_id)
-			   portions.push_back((*pit));
-	   }
-	}
+	return num_send_ports;
 }
 
 SInt32 NetworkModelOrnoc::getNumOniReceivePorts(cluster_id_t cluster_id)
 {
 	SInt32 num = 0;
-   for (auto rit = rings.begin(); rit != rings.end(); rit++){
-	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
+   for (rit_t rit = rings.begin(); rit != rings.end(); rit++){
+	   for (vector<Ring::Portion>::iterator pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
 		   if ((*pit).target_cluster_id == cluster_id)
 			   num += 1;
 	   }
@@ -908,16 +906,6 @@ SInt32 NetworkModelOrnoc::getNumOniReceivePorts(cluster_id_t cluster_id)
    return num;
 }
 
-
-void NetworkModelOrnoc::getClusterReceivePortions(cluster_id_t cluster_id, vector<Ring::Portion>& portions)
-{
-   for (auto rit = rings.begin(); rit != rings.end(); rit++){
-	   for (auto pit = (*rit).portions.begin(); pit != (*rit).portions.end(); pit++){
-		   if ((*pit).target_cluster_id == cluster_id)
-			   portions.push_back((*pit));
-	   }
-   }
-}
 
 SInt32 NetworkModelOrnoc::getLayerID(tile_id_t tile_id)
 {

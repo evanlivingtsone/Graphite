@@ -413,15 +413,14 @@ NetworkModel::computeProcessToTileMapping(UInt32 network_type)
 
       case NETWORK_ORNOC:
     	  return NetworkModelOrnoc::computeProcessToTileMapping();
-    	  break;
 
       case NETWORK_ATAC:
          return NetworkModelAtac::computeProcessToTileMapping();
 
       default:
-         fprintf(stderr, "*ERROR* Unrecognized network type(%u)\n", network_type);
-         abort();
-         return make_pair(false, vector<vector<tile_id_t> >());
+    	  fprintf(stderr, "*ERROR* Unrecognized network type(%u)\n", network_type);
+    	  abort();
+    	  return make_pair(false, vector<vector<tile_id_t> >());
    }
 }
 
