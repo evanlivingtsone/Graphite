@@ -27,7 +27,7 @@ public:
 private:
 
 	   typedef SInt32 wavelength_id_t;
-	   typedef SInt32 ring_id_t;
+	   typedef SInt32 waveguide_id_t;
 	   typedef SInt32 layer_id_t;
 	   typedef SInt32 cluster_id_t;
 
@@ -66,8 +66,8 @@ private:
 
 	   // internal classes
 
-	   // ring class containing portion and wavelengths
-	   class Ring{
+	   // waveguide class containing portion and wavelengths
+	   class Waveguide{
 	   public:
 
 		   class Wavelength{
@@ -84,14 +84,14 @@ private:
 			   cluster_id_t target_cluster_id;
 		   };
 
-		   Ring(ring_id_t id_, bool clockwise_, SInt32 num_portions_, SInt32 num_wavelengths_);
-		   ring_id_t id;
+		   Waveguide(waveguide_id_t id_, bool clockwise_, SInt32 num_portions_, SInt32 num_wavelengths_);
+		   waveguide_id_t id;
 		   bool clockwise;
 		   vector<Portion> portions;
 		   vector< vector<wavelength_id_t> > connectivity_matrix;
 	   };
 
-	   typedef vector<Ring>::iterator rit_t;
+	   typedef vector<Waveguide>::iterator rit_t;
 	   typedef vector<wavelength_id_t>::iterator wit_t;
 	   typedef vector< vector<wavelength_id_t> >::iterator cmit_t;
 
@@ -113,6 +113,18 @@ private:
 		   layer_id_t layer_id;
 	   };
 
+	   // waveguide class manages optical links and mapping
+	   class WaveguideManager {
+	   private:
+		   map<SInt32, OpticalLinkModel*> link_map;
+
+	   public:
+		   WaveguideManager() {}
+		   ~WaveguideManager();
+		   OpticalLinkModel* getWaveguide(SInt32 wg_id);
+		   void insertWaveguide(SInt32 wg_id, OpticalLinkModel* wg);
+	   };
+
 	   // fields
 
 	   static bool initialized;
@@ -128,22 +140,22 @@ private:
 	   static SInt32 cluster_size;
 	   static SInt32 numX_clusters_per_layer;
 	   static SInt32 numY_clusters_per_layer;
-	   static SInt32 cluster_width_per_layer;
-	   static SInt32 cluster_height_per_layer;
+	   static SInt32 cluster_width;
+	   static SInt32 cluster_height;
 
 	   // sub clusters
 	   static SInt32 num_access_points_per_cluster;
-	   static SInt32 num_sub_clusters_per_layer;
-	   static SInt32 numX_sub_clusters_per_layer;
-	   static SInt32 numY_sub_clusters_per_layer;
-	   static SInt32 sub_cluster_width_per_layer;
-	   static SInt32 sub_cluster_height_per_layer;
+	   static SInt32 num_sub_clusters_per_cluster;
+	   static SInt32 numX_sub_clusters_per_cluster;
+	   static SInt32 numY_sub_clusters_per_cluster;
+	   static SInt32 sub_cluster_width;
+	   static SInt32 sub_cluster_height;
 
 	   //
 
 	   static ReceiveNetworkType receive_network_type;
 	   static SInt32 num_receive_networks_per_cluster;
-	   static SInt32 max_wavelengths_per_ring;
+	   static SInt32 max_wavelengths_per_waveguide;
 	   static RoutingStrategy routing_strategy;
 	   static SInt32 unicast_distance_threshold;
 	   static bool contention_model_enabled;
@@ -154,7 +166,9 @@ private:
 	   static SInt32 num_layers;
 
 	   static vector<ClusterInfo> cluster_info_list;
-	   static vector<Ring> rings;
+
+	   static vector<Waveguide> waveguides;
+	   static SInt32 num_waveguides;
 
 	   // injection port router
 	   RouterModel* injection_router;
@@ -170,8 +184,9 @@ private:
 	   // receive hub router
 	   RouterModel* receive_hub_router;
 
-	   // optical links
-	   vector<OpticalLinkModel*> optical_links;
+
+	   // waveguide manager
+	   WaveguideManager* wg_manager;
 
 	   // broadcast tree link list
 	   vector<ElectricalLinkModel*> btree_link_list;
@@ -191,7 +206,7 @@ private:
 	   static void initializeClusters();
 	   static void initializeAccessPointList(SInt32 cluster_id);
 
-	   static SInt32 availableWavelength(Ring& ring, SInt32 source_id, SInt32 target_id);
+	   static SInt32 availableWavelength(Waveguide& waveguide, SInt32 source_id, SInt32 target_id);
 
 	   void createRNetRouterAndLinkModels();
 	   void destroyRNetRouterAndLinkModels();
@@ -215,7 +230,7 @@ private:
 	   static void getTileIDListInCluster(cluster_id_t cluster_id, vector<tile_id_t>& tile_id_list);
 
 	   static SInt32 getLayerID(tile_id_t tile_id);
-	   static SInt32 getRingID(tile_id_t tile_id);
+	   static SInt32 getWaveguideID(tile_id_t tile_id);
 
 	   static tile_id_t getNearestAccessPoint(tile_id_t tile_id);
 	   bool isAccessPoint(tile_id_t tile_id);

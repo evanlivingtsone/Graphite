@@ -1,2 +1,2 @@
-break NetworkModel::computeMemoryControllerPositions(unsigned int, int, int)
-break NetworkModel::computeProcessToTileMapping(unsigned int)
+break network_model_ornoc.cc:279
+break network_model_ornoc.cc:558
