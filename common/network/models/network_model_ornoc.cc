@@ -472,6 +472,8 @@ void NetworkModelOrnoc::routePacketOnENet(const NetPacket& pkt, tile_id_t sender
 
 void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender, tile_id_t receiver, queue<Hop>& next_hops)
 {
+	cout << endl <<"Tile ID: " << _tile_id << endl;
+
    // packet must be routed to access point via emesh first
    if (pkt.node_type == EMESH) {
 	   // make sure we are within the same cluster
@@ -486,10 +488,14 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 		 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(_tile_id)), SEND_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
 		 next_hops.push(hop);
+
+		  cout << endl << "	ONET: <access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
+
 	  }
 	  else {
 		 tile_id_t access_point = getNearestAccessPoint(sender);
 		 routePacketOnENet(pkt, sender, access_point, next_hops);
+		 cout << endl << "	ONET: <route to access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
 	  }
    }
    // after packet has been routed to acess point on ONet
@@ -497,6 +503,8 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 	 // broadcast mode is not used in ORNoC
 	 assert(receiver != NetPacket::BROADCAST);
+
+	 cout << endl << "	ONET: <send hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
 
 	 UInt64 zero_load_delay = 0;
 	 UInt64 contention_delay = 0;
@@ -520,7 +528,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 	 }
 	 else {
 
-		 // check for a direct connection first
+		 // check for a direct connection first - < may save time rather than putting both in same loop >
 		 for (UInt32 r = 0; r != waveguides.size(); r++) {
 			 SInt32 wl = waveguides[r].connectivity_matrix[sender_cluster_id][receiver_cluster_id];
 			 if (wl > -1) {
@@ -532,7 +540,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 		 if (output_wl == -1) {
 
-			 cout << endl << "Unable to find direct path - looking for other route to dest layer!" << endl;
+			 cout << endl << "	Unable to find direct path - looking for other route to dest layer!" << endl;
 
 			 // find first available connected cluster on receiver layer
 
@@ -545,6 +553,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 					 if (wl > -1) {
 						 output_wl = wl;
 						 output_waveguide = r;
+						 receiver_cluster_id = dest_layer_cluster_list[i];
 						 break;
 					 }
 				 }
@@ -553,39 +562,55 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 		 LOG_ASSERT_ERROR(output_wl > -1, "Path from sender(%i) to receiver(%i) unavailable - check connectivity matrix", sender, receiver);
 
-		 cout << endl << "SENDING...	Tile ID: " << _tile_id << " 	Cluster ID: " << sender_cluster_id << "	Send Ring: " << output_waveguide << endl; //TESTING TO REMOVE
+		 cout << endl << " 	Send cluster ID: " << sender_cluster_id << " 	Receiver cluster ID: " << receiver_cluster_id << "	Send Ring: " << output_waveguide << endl; //TESTING TO REMOVE
 
 		 send_hub_router->processPacket(pkt, output_waveguide, zero_load_delay, contention_delay);
 		 OpticalLinkModel* optical_link = wg_manager->getWaveguide(output_waveguide);
 		 optical_link->processPacket(pkt, 1 /*one dest for ornoc*/, zero_load_delay);
-		 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(receiver)), RECEIVE_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+		 Hop hop(pkt, getTileIDWithOpticalHub(receiver_cluster_id), RECEIVE_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
 		 next_hops.push(hop);
 	 }
    }
+
    // once the packet has been sent on ONet
+
    else if (pkt.node_type == RECEIVE_HUB) {
-	   //TODO look into this part...
 
-	  vector<tile_id_t> tile_id_list;
-	  getTileIDListInCluster(getClusterID(_tile_id), tile_id_list);
-	  assert(cluster_size == (SInt32) tile_id_list.size());
+	   SInt32 cluster_id = getClusterID(_tile_id);
 
-	  // TODO: why using sender?
-	  SInt32 receive_net_id = computeReceiveNetID(sender);
+//		// if packet destination is in this cluster then use receive network
+//		if (cluster_id == getClusterID(receiver)) {
+//
+//		}
+//		// otherwise electrically route
+//		else {
+//
+//		}
 
-	  UInt64 zero_load_delay = 0;
-	  UInt64 contention_delay = 0;
+		vector<tile_id_t> tile_id_list;
+		getTileIDListInCluster(cluster_id, tile_id_list);
+		assert(cluster_size == (SInt32) tile_id_list.size());
 
-	  // update router event counters, get delay, update dynamic energy
-	  receive_hub_router->processPacket(pkt, receive_net_id, zero_load_delay, contention_delay);
+		// TODO: figure out why using sender here?
+		SInt32 receive_net_id = computeReceiveNetID(sender);
 
-	  // for now just assume direct broadcast tree
-	  // update link counters, get delay, update dynamic energy
-	  btree_link_list[receive_net_id]->processPacket(pkt, zero_load_delay);
+		UInt64 zero_load_delay = 0;
+		UInt64 contention_delay = 0;
 
-	  // for now no broadcast to all tiles
-	  Hop hop(pkt, receiver, RECEIVE_TILE, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
-	  next_hops.push(hop);
+		// update router event counters, get delay, update dynamic energy
+		receive_hub_router->processPacket(pkt, receive_net_id, zero_load_delay, contention_delay);
+
+		// for now just assume direct broadcast tree
+		// update link counters, get delay, update dynamic energy
+		btree_link_list[receive_net_id]->processPacket(pkt, zero_load_delay);
+
+		// for now no broadcast to all tiles
+		Hop hop(pkt, receiver, RECEIVE_TILE, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
+		next_hops.push(hop);
+
+		cout << endl << "	ONET: <receiver hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver
+				<< " 	This cluster ID: " << cluster_id << endl; //TESTING TO REMOVE
+
    }
    else
    {
