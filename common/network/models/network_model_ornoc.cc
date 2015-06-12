@@ -12,6 +12,7 @@ using namespace std;
 #include "config.h"
 #include "log.h"
 #include "utils.h"
+//#include "logger.h"
 
 //// static variables
 bool NetworkModelOrnoc::initialized = false;
@@ -136,6 +137,9 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	      return;
 	   initialized = true;
 
+	   //logging::set_output((Sim()->getCfg()->getString("general/output_dir",".") + "/ornoc_log.out").c_str());
+	   //MLOG("See if %s works...", "< this >");
+
 	   SInt32 num_application_tiles = Config::getSingleton()->getApplicationTiles();
 
 	   try
@@ -163,7 +167,7 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	   LOG_ASSERT_ERROR(isPerfectSquare(num_application_tiles),
 	         "Num Application Tiles(%i) must be a perfect square", num_application_tiles);
 	   LOG_ASSERT_ERROR(isPower2(num_application_tiles),
-	         "Num Application Tiles(%i) _num_sub_clustersmust be a power of 2", num_application_tiles);
+	         "Num Application Tiles(%i) must be a power of 2", num_application_tiles);
 	   LOG_ASSERT_ERROR(isPower2(cluster_size),
 	         "Cluster Size(%i) must be a power of 2", cluster_size);
 	   LOG_ASSERT_ERROR((num_application_tiles % cluster_size) == 0,
@@ -178,10 +182,17 @@ void NetworkModelOrnoc::initializeRNetTopologyParams()
 	   LOG_ASSERT_ERROR(num_clusters_per_layer > 0, "Number of Clusters(%i) must be > 0", num_clusters);
 
 	   num_tiles_per_layer = num_clusters_per_layer * cluster_size;
+	   LOG_ASSERT_ERROR(isPerfectSquare(num_tiles_per_layer),
+	  	         "Num Application Tiles Per Layer (%i) must be a perfect square", num_tiles_per_layer);
+	   LOG_ASSERT_ERROR(isPower2(num_tiles_per_layer),
+	         "Num Application Tiles Per Layer (%i) must be a power of 2", num_tiles_per_layer);
 
 	   num_sub_clusters_per_cluster = num_access_points_per_cluster;
 	   LOG_ASSERT_ERROR(isPower2(num_access_points_per_cluster),
 	         "Number of Optical Access Points(%i) must be a power of 2", num_access_points_per_cluster);
+
+	   enet_width_per_layer = (SInt32) floor(sqrt(num_tiles_per_layer));
+	   enet_height_per_layer = enet_width_per_layer;
 
 	   initializeClusters();
 }
@@ -472,7 +483,10 @@ void NetworkModelOrnoc::routePacketOnENet(const NetPacket& pkt, tile_id_t sender
 
 void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender, tile_id_t receiver, queue<Hop>& next_hops)
 {
-	cout << endl <<"Tile ID: " << _tile_id << endl;
+	fstream ornoc_log_file;
+	ornoc_log_file.open ((Sim()->getCfg()->getString("general/output_dir",".") + "/ornoc_log.out").c_str(), std::fstream::out | std::fstream::app);
+
+	ornoc_log_file << endl <<"Tile ID: " << _tile_id << endl;
 
    // packet must be routed to access point via emesh first
    if (pkt.node_type == EMESH) {
@@ -489,13 +503,13 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 		 Hop hop(pkt, getTileIDWithOpticalHub(getClusterID(_tile_id)), SEND_HUB, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
 		 next_hops.push(hop);
 
-		  cout << endl << "	ONET: <access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
+		 ornoc_log_file << endl << "	ONET: <access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
 
 	  }
 	  else {
 		 tile_id_t access_point = getNearestAccessPoint(sender);
 		 routePacketOnENet(pkt, sender, access_point, next_hops);
-		 cout << endl << "	ONET: <route to access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
+		 ornoc_log_file << endl << "	ONET: <route to access point>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
 	  }
    }
    // after packet has been routed to acess point on ONet
@@ -504,7 +518,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 	 // broadcast mode is not used in ORNoC
 	 assert(receiver != NetPacket::BROADCAST);
 
-	 cout << endl << "	ONET: <send hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
+	 ornoc_log_file << endl << "	ONET: <send hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver << endl; //TESTING TO REMOVE
 
 	 UInt64 zero_load_delay = 0;
 	 UInt64 contention_delay = 0;
@@ -540,7 +554,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 		 if (output_wl == -1) {
 
-			 cout << endl << "	Unable to find direct path - looking for other route to dest layer!" << endl;
+			 ornoc_log_file << endl << "	Unable to find direct path - looking for other route to dest layer!" << endl;
 
 			 // find first available connected cluster on receiver layer
 
@@ -562,7 +576,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 
 		 LOG_ASSERT_ERROR(output_wl > -1, "Path from sender(%i) to receiver(%i) unavailable - check connectivity matrix", sender, receiver);
 
-		 cout << endl << " 	Send cluster ID: " << sender_cluster_id << " 	Receiver cluster ID: " << receiver_cluster_id << "	Send Ring: " << output_waveguide << endl; //TESTING TO REMOVE
+		 ornoc_log_file << endl << " 	Send cluster ID: " << sender_cluster_id << " 	Receiver cluster ID: " << receiver_cluster_id << "	Send Ring: " << output_waveguide << endl; //TESTING TO REMOVE
 
 		 send_hub_router->processPacket(pkt, output_waveguide, zero_load_delay, contention_delay);
 		 OpticalLinkModel* optical_link = wg_manager->getWaveguide(output_waveguide);
@@ -608,7 +622,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
 		Hop hop(pkt, receiver, RECEIVE_TILE, Latency(zero_load_delay,_frequency), Latency(contention_delay,_frequency));
 		next_hops.push(hop);
 
-		cout << endl << "	ONET: <receiver hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver
+		ornoc_log_file << endl << "	ONET: <receiver hub>" << "    Sender tile: " << sender << "    Receiver tile: " << receiver
 				<< " 	This cluster ID: " << cluster_id << endl; //TESTING TO REMOVE
 
    }
@@ -616,6 +630,7 @@ void NetworkModelOrnoc::routePacketOnONet(const NetPacket& pkt, tile_id_t sender
    {
 	  LOG_PRINT_ERROR("Unrecognized Node Type(%i)", pkt.node_type);
    }
+   ornoc_log_file.close();
 }
 
 //TODO
@@ -641,6 +656,7 @@ SInt32 NetworkModelOrnoc::computeReceiveNetID(tile_id_t sender)
 
 void NetworkModelOrnoc::initializeClusters()
 {
+
 	   cluster_info_list.resize(num_clusters);
 
 	   if (isEven(floorLog2(num_clusters_per_layer))) {
@@ -652,17 +668,9 @@ void NetworkModelOrnoc::initializeClusters()
 		   numY_clusters_per_layer = sqrt(num_clusters_per_layer * 2);
 	   }
 
-	   if (isEven(floorLog2(cluster_size))) {
-		   cluster_width = sqrt(cluster_size);
-		   cluster_height = sqrt(cluster_size);
-	   }
-	   else {
-		   cluster_width = sqrt(cluster_size / 2);
-		   cluster_height = sqrt(cluster_size * 2);
-	   }
+	   cluster_width = enet_width_per_layer / numX_clusters_per_layer;
+	   cluster_height = enet_height_per_layer / numY_clusters_per_layer;
 
-	   enet_width_per_layer = numX_clusters_per_layer * cluster_width;
-	   enet_height_per_layer = numY_clusters_per_layer * cluster_height;
 
 	   // initialize cluster ids and boundaries
 	   for (SInt32 l = 0; l < num_layers; l++) {
@@ -731,28 +739,25 @@ void NetworkModelOrnoc::initializeClusters()
 
 			   if(connectivity_matrix[i][j]){
 
-				   for(UInt32 r = 0; r != waveguides.size(); ++r){
+				   for(UInt32 w = 0; w != waveguides.size(); ++w){
 
-					   SInt32 wl = availableWavelength(waveguides[r], i, j);
-					   waveguides[r].connectivity_matrix[i][j] = wl;
+					   SInt32 wl = availableWavelength(waveguides[w], i, j);
 
-					   if ( (wl < 0) && (r == (waveguides.size() - 1)) ) {
+					   if (wl > -1) {
+							   reserveWavelength(waveguides[w], i, j, wl);
+							   waveguides[w].connectivity_matrix[i][j] = wl;
+							   break;
+					   }
+					   else if ( (wl < 0) && (w == (waveguides.size() - 1)) ) {
 						   // create new waveguide if there is no available connection in any existing ring
 						   waveguide_id_t waveguide_id = waveguides.size();
 						   waveguides.push_back(Waveguide(waveguide_id, isEven(waveguide_id), num_clusters, max_wavelengths_per_waveguide));
 						   num_waveguides++;
-					   }
-
-					   if (wl > -1) {
-						   UInt32 idx, eidx;
-						   idx = (waveguides[r].clockwise) ? i : j;
-						   eidx = (waveguides[r].clockwise) ? j : i;
-						   while(idx != eidx){
-							   waveguides[r].portions[idx].wavelengths[wl].reserved = true;
-							   idx = (idx + 1) % num_clusters;
-						   }
+						   reserveWavelength(waveguides[w + 1], i, j, 0);
+						   waveguides[w + 1].connectivity_matrix[i][j] = 0;
 						   break;
 					   }
+
 				   }
 			   }
 		   }
@@ -760,24 +765,26 @@ void NetworkModelOrnoc::initializeClusters()
 
 	   // details printout
 	   if (verbose_output){
-		   cout << endl << "ORNoC structure:" << endl;
-
-		   for (vector<Waveguide>::iterator rit = waveguides.begin(); rit != waveguides.end(); rit++){
-			   Waveguide r = *rit;
-			   cout << "Waveguide ID: " << r.id << endl;
-			   for (SInt32 i = 0; i != num_clusters; i++) {
-				   for (SInt32 j = 0; j != num_clusters; j++) {
-					   if (r.connectivity_matrix[i][j] > -1) {
-						   cout << r.connectivity_matrix[i][j];
+		   ofstream ornoc_struct_file ((Sim()->getCfg()->getString("general/output_dir",".") + "/ornoc_struct.out").c_str());
+		   if (ornoc_struct_file.is_open()) {
+			   for (vector<Waveguide>::iterator rit = waveguides.begin(); rit != waveguides.end(); rit++){
+				   Waveguide r = *rit;
+				   ornoc_struct_file << "Waveguide ID: " << r.id << endl;
+				   for (SInt32 i = 0; i != num_clusters; i++) {
+					   for (SInt32 j = 0; j != num_clusters; j++) {
+						   if (r.connectivity_matrix[i][j] > -1) {
+							   ornoc_struct_file << r.connectivity_matrix[i][j];
+						   }
+						   else {
+							   ornoc_struct_file << "-";
+						   }
 					   }
-					   else {
-						   cout << "-";
-					   }
+					   ornoc_struct_file << endl;
 				   }
-				   cout << endl;
 			   }
+			   ornoc_struct_file << endl;
+			   ornoc_struct_file.close();
 		   }
-		   cout << endl;
 	   }
 }
 
@@ -853,6 +860,19 @@ SInt32 NetworkModelOrnoc::availableWavelength(Waveguide& waveguide, SInt32 sourc
 	}
 	return -1;
 }
+
+void NetworkModelOrnoc::reserveWavelength(Waveguide& waveguide, SInt32 source_id, SInt32 target_id, wavelength_id_t wl)
+{
+	   UInt32 idx, eidx;
+	   idx = (waveguide.clockwise) ? source_id : target_id;
+	   eidx = (waveguide.clockwise) ? target_id : source_id;
+	   while(idx != eidx){
+		   waveguide.portions[idx].wavelengths[wl].reserved = true;
+		   idx = (idx + 1) % num_clusters;
+	   }
+
+}
+
 
 void NetworkModelOrnoc::initializeAccessPointList(SInt32 cluster_id)
 {
@@ -933,8 +953,8 @@ void NetworkModelOrnoc::getTileIDListInCluster(SInt32 cluster_id, vector<tile_id
 	SInt32 core_x, core_y;
 
 	layer_id = cluster_id / num_clusters_per_layer;
-	cluster_pos_x = cluster_id % cluster_width;
-	cluster_pos_y = (cluster_id % num_clusters_per_layer) / cluster_width;
+	cluster_pos_x = (cluster_id % num_clusters_per_layer)  % numX_clusters_per_layer;
+	cluster_pos_y = (cluster_id % num_clusters_per_layer) / numX_clusters_per_layer;
 
 	core_x = (cluster_pos_x * cluster_width);
 	core_y = (cluster_pos_y * cluster_height);

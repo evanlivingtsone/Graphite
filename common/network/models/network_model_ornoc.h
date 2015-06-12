@@ -207,6 +207,7 @@ private:
 	   static void initializeAccessPointList(SInt32 cluster_id);
 
 	   static SInt32 availableWavelength(Waveguide& waveguide, SInt32 source_id, SInt32 target_id);
+	   static void reserveWavelength(Waveguide& waveguide, SInt32 source_id, SInt32 target_id, wavelength_id_t wl);
 
 	   void createRNetRouterAndLinkModels();
 	   void destroyRNetRouterAndLinkModels();
